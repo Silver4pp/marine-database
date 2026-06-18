@@ -1,10 +1,9 @@
 -- =============================================================================
--- DATABASE SKEMA PASIR LAUT - FINAL VERSION
--- Mencakup semua rekomendasi data architect
+-- DATABASE SKEMA PASIR LAUT - FINAL BULK (URUTAN DIPERBAIKI)
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- 1. CREATING SCHEMAS (tanpa reserved keyword)
+-- 1. CREATING SCHEMAS
 -- -----------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS "param";
 CREATE SCHEMA IF NOT EXISTS "usr";
@@ -163,7 +162,7 @@ CREATE TABLE param.organization (
 );
 
 -- -----------------------------------------------------------------------------
--- 4. SCHEMA: USR (sebelumnya "user")
+-- 4. SCHEMA: USR
 -- -----------------------------------------------------------------------------
 CREATE TABLE usr.role (
     code_role varchar(20) PRIMARY KEY,
@@ -280,7 +279,7 @@ CREATE TABLE partner.contact (
 );
 
 -- -----------------------------------------------------------------------------
--- 7. SCHEMA: VESSEL
+-- 7. SCHEMA: VESSEL (tanpa movement_log)
 -- -----------------------------------------------------------------------------
 CREATE TABLE vessel.type (
     code_type varchar(20) PRIMARY KEY,
@@ -350,25 +349,6 @@ CREATE TABLE vessel.maintenance (
     created_at timestamp DEFAULT now(),
     updated_at timestamp
 );
-
-CREATE TABLE vessel.movement_log (
-    id serial PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    code_site varchar(20) REFERENCES site.info(code_site) ON DELETE SET NULL,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
-    status varchar(30) NOT NULL,
-    latitude double precision,
-    longitude double precision,
-    log_time timestamp DEFAULT now(),
-    notes text,
-    created_at timestamp DEFAULT now()
-) PARTITION BY RANGE (log_time);
-
--- Partisi contoh (Jan - Feb 2026)
-CREATE TABLE vessel.movement_log_202601 PARTITION OF vessel.movement_log
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE vessel.movement_log_202602 PARTITION OF vessel.movement_log
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
 
 -- -----------------------------------------------------------------------------
 -- 8. SCHEMA: BUYER
@@ -515,6 +495,29 @@ CREATE TABLE operational.statement_of_fact (
 );
 
 -- -----------------------------------------------------------------------------
+-- 7B. VESSEL MOVEMENT_LOG (Sekarang setelah operational.delivery_order ada)
+-- -----------------------------------------------------------------------------
+CREATE TABLE vessel.movement_log (
+    id serial,
+    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
+    code_site varchar(20) REFERENCES site.info(code_site) ON DELETE SET NULL,
+    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
+    status varchar(30) NOT NULL,
+    latitude double precision,
+    longitude double precision,
+    log_time timestamp DEFAULT now(),
+    notes text,
+    created_at timestamp DEFAULT now(),
+    PRIMARY KEY (id, log_time)
+) PARTITION BY RANGE (log_time);
+
+-- Partisi contoh (Jan - Feb 2026)
+CREATE TABLE vessel.movement_log_202601 PARTITION OF vessel.movement_log
+    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE vessel.movement_log_202602 PARTITION OF vessel.movement_log
+    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+
+-- -----------------------------------------------------------------------------
 -- 10. SCHEMA: FINANCE
 -- -----------------------------------------------------------------------------
 CREATE TABLE finance.exchange_rate (
@@ -557,7 +560,6 @@ CREATE TABLE finance.invoice (
     CONSTRAINT chk_invoice_status CHECK (status IN ('DRAFT','ISSUED','PAID','PARTIAL','CANCELLED'))
 );
 
--- Tabel jembatan invoice - delivery order (many-to-many)
 CREATE TABLE finance.invoice_delivery_order (
     id serial PRIMARY KEY,
     invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
@@ -672,7 +674,7 @@ CREATE TABLE enviro.buoy_reading (
     water_density double precision,
     tide_level double precision,
     created_at timestamp DEFAULT now(),
-    CONSTRAINT uq_buoy_reading UNIQUE (code_buoy, record_time)
+    PRIMARY KEY (id, record_time)  -- disamakan dengan movement_log
 ) PARTITION BY RANGE (record_time);
 
 -- Partisi contoh
@@ -781,7 +783,7 @@ CREATE TABLE document.entity_link (
 -- -----------------------------------------------------------------------------
 CREATE TABLE audit.activity_log (
     id serial PRIMARY KEY,
-    code_user varchar(20) NOT NULL,  -- Tidak ada FK karena bisa mencatat aktivitas sistem atau user yang sudah dihapus
+    code_user varchar(20) NOT NULL,
     action_type varchar(20) NOT NULL,
     schema_name varchar(50) NOT NULL,
     table_name varchar(50) NOT NULL,
@@ -840,7 +842,7 @@ CREATE TRIGGER trg_update_deposit_balance
 AFTER INSERT OR UPDATE OR DELETE ON buyer.deposit_ledger
 FOR EACH ROW EXECUTE PROCEDURE update_buyer_deposit_balance();
 
--- D. PERFORMANCE INDEXES (tambahan + existing)
+-- D. PERFORMANCE INDEXES
 CREATE INDEX idx_audit_activity_user ON audit.activity_log (code_user);
 CREATE INDEX idx_audit_activity_table ON audit.activity_log (table_name, record_id);
 CREATE INDEX idx_audit_activity_time ON audit.activity_log (created_at);
@@ -853,7 +855,7 @@ CREATE INDEX idx_fin_invoice_partner ON finance.invoice (code_partner);
 CREATE INDEX idx_fin_invoice_do ON finance.invoice (do_number);
 CREATE INDEX idx_fin_payment_invoice ON finance.payment (invoice_number);
 CREATE INDEX idx_fin_payment_date ON finance.payment (payment_date);
-CREATE INDEX idx_env_buoy_reading_time ON enviro.buoy_reading (record_time);  -- hanya pada partisi induk, otomatis diwarisi
+CREATE INDEX idx_env_buoy_reading_time ON enviro.buoy_reading (record_time);
 CREATE INDEX idx_doc_link_ref ON document.entity_link (reference_schema, reference_table, reference_id);
 CREATE INDEX idx_vessel_movement_time ON vessel.movement_log (code_vessel, log_time);
 CREATE INDEX idx_env_weather_time ON enviro.weather_log (code_site, log_time);
@@ -867,6 +869,6 @@ CREATE INDEX idx_movement_log_do ON vessel.movement_log (do_number);
 CREATE INDEX idx_approval_ref ON operational.approval_log (ref_table, ref_id);
 CREATE INDEX idx_notification_log_time ON param.notification_log (sent_at);
 
--- E. CHECK CONSTRAINTS (tambahan untuk tabel yang belum)
+-- E. CHECK CONSTRAINTS
 ALTER TABLE vessel.maintenance ADD CONSTRAINT chk_mt_status CHECK (status IN ('SCHEDULED','IN PROGRESS','COMPLETED','CANCELLED'));
 ALTER TABLE vessel.crew_history ADD CONSTRAINT chk_crew_status CHECK (status IN ('ON_BOARD','SIGNED_OFF'));
