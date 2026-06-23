@@ -29,11 +29,39 @@ CREATE OR REPLACE FUNCTION fn_audit_activity()
 RETURNS TRIGGER AS $$
 DECLARE
     v_record_id TEXT;
+    v_data JSONB;
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        v_record_id := OLD.id::TEXT;
+        v_data := to_jsonb(OLD);
     ELSE
-        v_record_id := NEW.id::TEXT;
+        v_data := to_jsonb(NEW);
+    END IF;
+
+    IF TG_NARGS > 0 THEN
+        v_record_id := v_data ->> TG_ARGV[0];
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := COALESCE(
+            v_data->>'id',
+            v_data->>'code_user',
+            v_data->>'code_vessel',
+            v_data->>'code_site',
+            v_data->>'code_partner',
+            v_data->>'code_buyer',
+            v_data->>'po_number',
+            v_data->>'do_number',
+            v_data->>'invoice_number',
+            v_data->>'payment_number',
+            v_data->>'no_form',
+            v_data->>'code_station',
+            v_data->>'code_role',
+            v_data->>'code_type'
+        );
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
     END IF;
 
     INSERT INTO audit.activity_log (
@@ -50,6 +78,7 @@ BEGIN
         NULL,
         NOW()
     );
+    
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -925,7 +954,7 @@ LEFT JOIN (
 
 -- View untuk enviro
 CREATE OR REPLACE VIEW enviro.v_monitoring_enviro AS
-SELECT
+SELECT DISTINCT ON (a.code_station)
     a.code_station,
     a.salinity,
     a.turbidity,
@@ -933,8 +962,11 @@ SELECT
     a.dissolved_oxygen,
     a.water_density,
     a.tide_level
-FROM enviro.station_reading a
-where a.record_time = (select max(distinct record_time) from enviro.station_reading);
+FROM 
+    enviro.station_reading a
+ORDER BY 
+    a.code_station, 
+    a.record_time DESC;
 
 -- =============================================================================
 -- 16. TRIGGERS, INDEXES, & CONSTRAINTS
