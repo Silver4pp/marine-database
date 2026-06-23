@@ -1,10 +1,5 @@
--- =============================================================================
--- DATABASE SKEMA PASIR LAUT - FINAL VERSION
--- Mencakup semua rekomendasi data architect
--- =============================================================================
-
 -- -----------------------------------------------------------------------------
--- 1. CREATING SCHEMAS (tanpa reserved keyword)
+-- 1. CREATING SCHEMAS
 -- -----------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS "param";
 CREATE SCHEMA IF NOT EXISTS "usr";
@@ -17,6 +12,7 @@ CREATE SCHEMA IF NOT EXISTS "enviro";
 CREATE SCHEMA IF NOT EXISTS "finance";
 CREATE SCHEMA IF NOT EXISTS "document";
 CREATE SCHEMA IF NOT EXISTS "audit";
+CREATE SCHEMA IF NOT EXISTS "form";
 
 -- -----------------------------------------------------------------------------
 -- 2. AUTOMATION FUNCTION
@@ -33,11 +29,39 @@ CREATE OR REPLACE FUNCTION fn_audit_activity()
 RETURNS TRIGGER AS $$
 DECLARE
     v_record_id TEXT;
+    v_data JSONB;
 BEGIN
     IF TG_OP = 'DELETE' THEN
-        v_record_id := OLD.id::TEXT;
+        v_data := to_jsonb(OLD);
     ELSE
-        v_record_id := NEW.id::TEXT;
+        v_data := to_jsonb(NEW);
+    END IF;
+
+    IF TG_NARGS > 0 THEN
+        v_record_id := v_data ->> TG_ARGV[0];
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := COALESCE(
+            v_data->>'id',
+            v_data->>'code_user',
+            v_data->>'code_vessel',
+            v_data->>'code_site',
+            v_data->>'code_partner',
+            v_data->>'code_buyer',
+            v_data->>'po_number',
+            v_data->>'do_number',
+            v_data->>'invoice_number',
+            v_data->>'payment_number',
+            v_data->>'no_form',
+            v_data->>'code_station',
+            v_data->>'code_role',
+            v_data->>'code_type'
+        );
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
     END IF;
 
     INSERT INTO audit.activity_log (
@@ -54,6 +78,7 @@ BEGIN
         NULL,
         NOW()
     );
+    
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
@@ -80,7 +105,7 @@ $$ LANGUAGE plpgsql;
 -- -----------------------------------------------------------------------------
 -- 3. SCHEMA: PARAM
 -- -----------------------------------------------------------------------------
-CREATE TABLE param.system_config (
+CREATE TABLE IF NOT EXISTS param.system_config (
     code_config varchar(50) PRIMARY KEY,
     config_value text NOT NULL,
     description text,
@@ -89,7 +114,7 @@ CREATE TABLE param.system_config (
     updated_at timestamp DEFAULT now()
 );
 
-CREATE TABLE param.dropdown_list (
+CREATE TABLE IF NOT EXISTS param.dropdown_list (
     id serial PRIMARY KEY,
     category varchar(50) NOT NULL,
     code_value varchar(50) NOT NULL,
@@ -99,7 +124,7 @@ CREATE TABLE param.dropdown_list (
     CONSTRAINT uq_dropdown UNIQUE (category, code_value)
 );
 
-CREATE TABLE param.notification_template (
+CREATE TABLE IF NOT EXISTS param.notification_template (
     code_template varchar(50) PRIMARY KEY,
     platform varchar(20) NOT NULL,
     message_body text NOT NULL,
@@ -107,7 +132,7 @@ CREATE TABLE param.notification_template (
     updated_at timestamp DEFAULT now()
 );
 
-CREATE TABLE param.notification_log (
+CREATE TABLE IF NOT EXISTS param.notification_log (
     id serial PRIMARY KEY,
     code_template varchar(50) REFERENCES param.notification_template(code_template),
     recipient varchar(100) NOT NULL,
@@ -117,7 +142,7 @@ CREATE TABLE param.notification_log (
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE param.abbreviation (
+CREATE TABLE IF NOT EXISTS param.abbreviation (
     code_abbr varchar(50) PRIMARY KEY,
     full_name varchar(255) NOT NULL,
     category varchar(50),
@@ -127,34 +152,14 @@ CREATE TABLE param.abbreviation (
     updated_at timestamp
 );
 
-CREATE TABLE param.uom (
+CREATE TABLE IF NOT EXISTS param.uom (
     code_uom varchar(10) PRIMARY KEY,
     name varchar(50) NOT NULL,
     description text,
     is_active boolean DEFAULT true
 );
 
-INSERT INTO param.uom (code_uom, name) VALUES
-    ('M3', 'Meter Kubik'),
-    ('MT', 'Metrik Ton'),
-    ('LTR', 'Liter'),
-    ('KG', 'Kilogram')
-ON CONFLICT (code_uom) DO NOTHING;
-
-CREATE TABLE param.commodity (
-    code_commodity varchar(20) PRIMARY KEY,
-    name varchar(100) NOT NULL,
-    default_uom varchar(10) REFERENCES param.uom(code_uom),
-    description text,
-    is_active boolean DEFAULT true
-);
-
-INSERT INTO param.commodity (code_commodity, name, default_uom) VALUES
-    ('SEA_SAND', 'Pasir Laut', 'M3'),
-    ('GRAVEL', 'Kerikil', 'M3')
-ON CONFLICT (code_commodity) DO NOTHING;
-
-CREATE TABLE param.organization (
+CREATE TABLE IF NOT EXISTS param.organization (
     code_org varchar(20) PRIMARY KEY,
     name varchar(100) NOT NULL,
     is_active boolean DEFAULT true,
@@ -163,9 +168,9 @@ CREATE TABLE param.organization (
 );
 
 -- -----------------------------------------------------------------------------
--- 4. SCHEMA: USR (sebelumnya "user")
+-- 4. SCHEMA: USR
 -- -----------------------------------------------------------------------------
-CREATE TABLE usr.role (
+CREATE TABLE IF NOT EXISTS usr.role (
     code_role varchar(20) PRIMARY KEY,
     description text,
     is_active boolean DEFAULT true,
@@ -173,20 +178,20 @@ CREATE TABLE usr.role (
     updated_at timestamp
 );
 
-CREATE TABLE usr.permission (
+CREATE TABLE IF NOT EXISTS usr.permission (
     code_permission varchar(50) PRIMARY KEY,
     module varchar(50) NOT NULL,
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE usr.role_permission (
+CREATE TABLE IF NOT EXISTS usr.role_permission (
     code_role varchar(20) REFERENCES usr.role(code_role) ON DELETE CASCADE,
     code_permission varchar(50) REFERENCES usr.permission(code_permission) ON DELETE CASCADE,
     created_at timestamp DEFAULT now(),
     PRIMARY KEY (code_role, code_permission)
 );
 
-CREATE TABLE usr.info (
+CREATE TABLE IF NOT EXISTS usr.info (
     code_user varchar(20) PRIMARY KEY,
     password_hash varchar(255) NOT NULL,
     name varchar(100) NOT NULL,
@@ -200,7 +205,7 @@ CREATE TABLE usr.info (
     deleted_at timestamp
 );
 
-CREATE TABLE usr.contact (
+CREATE TABLE IF NOT EXISTS usr.contact (
     id serial PRIMARY KEY,
     code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE CASCADE,
     contact_type varchar(30) NOT NULL,
@@ -213,14 +218,14 @@ CREATE TABLE usr.contact (
 -- -----------------------------------------------------------------------------
 -- 5. SCHEMA: SITE
 -- -----------------------------------------------------------------------------
-CREATE TABLE site.type (
+CREATE TABLE IF NOT EXISTS site.type (
     code_type varchar(20) PRIMARY KEY,
     description text,
     is_active boolean DEFAULT true,
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE site.info (
+CREATE TABLE IF NOT EXISTS site.info (
     code_site varchar(20) PRIMARY KEY,
     code_type varchar(20) REFERENCES site.type(code_type),
     name varchar(100) NOT NULL,
@@ -233,7 +238,7 @@ CREATE TABLE site.info (
     updated_at timestamp
 );
 
-CREATE TABLE site.roster (
+CREATE TABLE IF NOT EXISTS site.roster (
     id serial PRIMARY KEY,
     code_site varchar(20) REFERENCES site.info(code_site) ON DELETE CASCADE,
     code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE CASCADE,
@@ -249,14 +254,14 @@ CREATE TABLE site.roster (
 -- -----------------------------------------------------------------------------
 -- 6. SCHEMA: PARTNER
 -- -----------------------------------------------------------------------------
-CREATE TABLE partner.type (
+CREATE TABLE IF NOT EXISTS partner.type (
     code_type varchar(20) PRIMARY KEY,
     description text,
     is_active boolean DEFAULT true,
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE partner.info (
+CREATE TABLE IF NOT EXISTS partner.info (
     code_partner varchar(20) PRIMARY KEY,
     code_type varchar(20) REFERENCES partner.type(code_type),
     name varchar(100) NOT NULL,
@@ -268,7 +273,7 @@ CREATE TABLE partner.info (
     updated_at timestamp
 );
 
-CREATE TABLE partner.contact (
+CREATE TABLE IF NOT EXISTS partner.contact (
     id serial PRIMARY KEY,
     code_partner varchar(20) REFERENCES partner.info(code_partner) ON DELETE CASCADE,
     pic_name varchar(100),
@@ -282,14 +287,14 @@ CREATE TABLE partner.contact (
 -- -----------------------------------------------------------------------------
 -- 7. SCHEMA: VESSEL
 -- -----------------------------------------------------------------------------
-CREATE TABLE vessel.type (
+CREATE TABLE IF NOT EXISTS vessel.type (
     code_type varchar(20) PRIMARY KEY,
     description text,
     is_active boolean DEFAULT true,
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE vessel.info (
+CREATE TABLE IF NOT EXISTS vessel.info (
     code_vessel varchar(20) PRIMARY KEY,
     code_partner varchar(20) REFERENCES partner.info(code_partner),
     code_type varchar(20) REFERENCES vessel.type(code_type),
@@ -304,7 +309,7 @@ CREATE TABLE vessel.info (
     updated_at timestamp
 );
 
-CREATE TABLE vessel.site_assignment (
+CREATE TABLE IF NOT EXISTS vessel.site_assignment (
     id serial PRIMARY KEY,
     code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
     code_site varchar(20) REFERENCES site.info(code_site),
@@ -315,7 +320,7 @@ CREATE TABLE vessel.site_assignment (
     CONSTRAINT chk_site_assignment_dates CHECK (end_date IS NULL OR end_date >= start_date)
 );
 
-CREATE TABLE vessel.certificate (
+CREATE TABLE IF NOT EXISTS vessel.certificate (
     id serial PRIMARY KEY,
     code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
     name varchar(100) NOT NULL,
@@ -327,7 +332,7 @@ CREATE TABLE vessel.certificate (
     updated_at timestamp
 );
 
-CREATE TABLE vessel.crew_history (
+CREATE TABLE IF NOT EXISTS vessel.crew_history (
     id serial PRIMARY KEY,
     code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
     code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE CASCADE,
@@ -339,7 +344,7 @@ CREATE TABLE vessel.crew_history (
     updated_at timestamp
 );
 
-CREATE TABLE vessel.maintenance (
+CREATE TABLE IF NOT EXISTS vessel.maintenance (
     id serial PRIMARY KEY,
     code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
     code_partner varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
@@ -351,36 +356,17 @@ CREATE TABLE vessel.maintenance (
     updated_at timestamp
 );
 
-CREATE TABLE vessel.movement_log (
-    id serial PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    code_site varchar(20) REFERENCES site.info(code_site) ON DELETE SET NULL,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
-    status varchar(30) NOT NULL,
-    latitude double precision,
-    longitude double precision,
-    log_time timestamp DEFAULT now(),
-    notes text,
-    created_at timestamp DEFAULT now()
-) PARTITION BY RANGE (log_time);
-
--- Partisi contoh (Jan - Feb 2026)
-CREATE TABLE vessel.movement_log_202601 PARTITION OF vessel.movement_log
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE vessel.movement_log_202602 PARTITION OF vessel.movement_log
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
-
 -- -----------------------------------------------------------------------------
 -- 8. SCHEMA: BUYER
 -- -----------------------------------------------------------------------------
-CREATE TABLE buyer.type (
+CREATE TABLE IF NOT EXISTS buyer.type (
     code_type varchar(20) PRIMARY KEY,
     description text,
     is_active boolean DEFAULT true,
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE buyer.info (
+CREATE TABLE IF NOT EXISTS buyer.info (
     code_buyer varchar(20) PRIMARY KEY,
     code_type varchar(20) REFERENCES buyer.type(code_type),
     name varchar(100) NOT NULL,
@@ -393,7 +379,7 @@ CREATE TABLE buyer.info (
     updated_at timestamp
 );
 
-CREATE TABLE buyer.discharge_location (
+CREATE TABLE IF NOT EXISTS buyer.discharge_location (
     id serial PRIMARY KEY,
     code_buyer varchar(20) REFERENCES buyer.info(code_buyer) ON DELETE CASCADE,
     name varchar(100) NOT NULL,
@@ -404,14 +390,14 @@ CREATE TABLE buyer.discharge_location (
     updated_at timestamp
 );
 
-CREATE TABLE buyer.deposit_ledger (
+CREATE TABLE IF NOT EXISTS buyer.deposit_ledger (
     id serial PRIMARY KEY,
     code_buyer varchar(20) REFERENCES buyer.info(code_buyer) ON DELETE CASCADE,
     transaction_date timestamp DEFAULT now(),
     transaction_type varchar(30) NOT NULL,
     amount numeric(15,2) NOT NULL,
     reference_doc varchar(50),
-    notes text,
+    description text,
     created_by varchar(20) REFERENCES usr.info(code_user),
     created_at timestamp DEFAULT now(),
     updated_at timestamp
@@ -420,25 +406,24 @@ CREATE TABLE buyer.deposit_ledger (
 -- -----------------------------------------------------------------------------
 -- 9. SCHEMA: OPERATIONAL
 -- -----------------------------------------------------------------------------
-CREATE TABLE operational.purchase_order (
+CREATE TABLE IF NOT EXISTS operational.purchase_order (
     po_number varchar(50) PRIMARY KEY,
     public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     code_buyer varchar(20) REFERENCES buyer.info(code_buyer),
     po_date date NOT NULL,
     target_completion_date date,
-    code_commodity varchar(20) REFERENCES param.commodity(code_commodity) DEFAULT 'SEA_SAND',
     uom varchar(10) REFERENCES param.uom(code_uom) DEFAULT 'M3',
     total_volume double precision NOT NULL,
     unit_price numeric(15,2) NOT NULL,
     total_amount numeric(15,2) NOT NULL,
     status varchar(20) DEFAULT 'DRAFT',
-    notes text,
+    description text,
     created_at timestamp DEFAULT now(),
     updated_at timestamp,
     CONSTRAINT chk_po_status CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','IN PROGRESS','COMPLETED','CANCELLED'))
 );
 
-CREATE TABLE operational.approval_log (
+CREATE TABLE IF NOT EXISTS operational.approval_log (
     id serial PRIMARY KEY,
     ref_table varchar(50) NOT NULL,
     ref_id varchar(50) NOT NULL,
@@ -449,7 +434,7 @@ CREATE TABLE operational.approval_log (
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE operational.daily_production (
+CREATE TABLE IF NOT EXISTS operational.daily_production (
     id serial PRIMARY KEY,
     code_site varchar(20) REFERENCES site.info(code_site),
     code_vessel varchar(20) REFERENCES vessel.info(code_vessel),
@@ -461,7 +446,7 @@ CREATE TABLE operational.daily_production (
     CONSTRAINT uq_daily_production UNIQUE (code_vessel, production_date)
 );
 
-CREATE TABLE operational.delivery_order (
+CREATE TABLE IF NOT EXISTS operational.delivery_order (
     do_number varchar(50) PRIMARY KEY,
     public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     po_number varchar(50) REFERENCES operational.purchase_order(po_number),
@@ -476,7 +461,7 @@ CREATE TABLE operational.delivery_order (
     CONSTRAINT chk_do_status CHECK (status IN ('ISSUED','LOADING','SAILING','DELIVERED','CANCELLED'))
 );
 
-CREATE TABLE operational.cargo_survey (
+CREATE TABLE IF NOT EXISTS operational.cargo_survey (
     id serial PRIMARY KEY,
     do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
     code_partner varchar(20) REFERENCES partner.info(code_partner),
@@ -491,7 +476,7 @@ CREATE TABLE operational.cargo_survey (
     CONSTRAINT chk_survey_status CHECK (status IN ('PENDING','VERIFIED','REJECTED'))
 );
 
-CREATE TABLE operational.bill_of_lading (
+CREATE TABLE IF NOT EXISTS operational.bill_of_lading (
     bl_number varchar(50) PRIMARY KEY,
     public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
@@ -504,7 +489,7 @@ CREATE TABLE operational.bill_of_lading (
     CONSTRAINT chk_bl_status CHECK (status IN ('ISSUED','RELEASED','SURRENDERED'))
 );
 
-CREATE TABLE operational.statement_of_fact (
+CREATE TABLE IF NOT EXISTS operational.statement_of_fact (
     id serial PRIMARY KEY,
     do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
     event_time timestamp NOT NULL,
@@ -515,9 +500,32 @@ CREATE TABLE operational.statement_of_fact (
 );
 
 -- -----------------------------------------------------------------------------
+-- 7B. VESSEL MOVEMENT_LOG
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS vessel.movement_log (
+    id serial,
+    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
+    code_site varchar(20) REFERENCES site.info(code_site) ON DELETE SET NULL,
+    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
+    status varchar(30) NOT NULL,
+    latitude double precision,
+    longitude double precision,
+    log_time timestamp DEFAULT now(),
+    description text,
+    created_at timestamp DEFAULT now(),
+    PRIMARY KEY (id, log_time)
+) PARTITION BY RANGE (log_time);
+
+-- Partisi Movement Log
+CREATE TABLE IF NOT EXISTS vessel.movement_log_202601 PARTITION OF vessel.movement_log
+    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE IF NOT EXISTS vessel.movement_log_202602 PARTITION OF vessel.movement_log
+    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+
+-- -----------------------------------------------------------------------------
 -- 10. SCHEMA: FINANCE
 -- -----------------------------------------------------------------------------
-CREATE TABLE finance.exchange_rate (
+CREATE TABLE IF NOT EXISTS finance.exchange_rate (
     id serial PRIMARY KEY,
     currency_from varchar(3) NOT NULL,
     currency_to varchar(3) DEFAULT 'IDR',
@@ -528,7 +536,7 @@ CREATE TABLE finance.exchange_rate (
     CONSTRAINT uq_exchange_rate UNIQUE (currency_from, currency_to, rate_date, rate_type)
 );
 
-CREATE TABLE finance.invoice (
+CREATE TABLE IF NOT EXISTS finance.invoice (
     invoice_number varchar(50) PRIMARY KEY,
     public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     invoice_type varchar(20) NOT NULL,
@@ -547,7 +555,7 @@ CREATE TABLE finance.invoice (
     subtotal_idr numeric(15,2) DEFAULT 0.00,
     total_amount_idr numeric(15,2) DEFAULT 0.00,
     status varchar(20) DEFAULT 'DRAFT',
-    notes text,
+    description text,
     created_at timestamp DEFAULT now(),
     updated_at timestamp,
     CONSTRAINT chk_invoice_entity CHECK (
@@ -557,18 +565,17 @@ CREATE TABLE finance.invoice (
     CONSTRAINT chk_invoice_status CHECK (status IN ('DRAFT','ISSUED','PAID','PARTIAL','CANCELLED'))
 );
 
--- Tabel jembatan invoice - delivery order (many-to-many)
-CREATE TABLE finance.invoice_delivery_order (
+CREATE TABLE IF NOT EXISTS finance.invoice_delivery_order (
     id serial PRIMARY KEY,
     invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
     do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
     allocated_volume double precision,
-    notes text,
+    description text,
     created_at timestamp DEFAULT now(),
     CONSTRAINT uq_invoice_do UNIQUE (invoice_number, do_number)
 );
 
-CREATE TABLE finance.invoice_item (
+CREATE TABLE IF NOT EXISTS finance.invoice_item (
     id serial PRIMARY KEY,
     invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
     description varchar(255) NOT NULL,
@@ -579,7 +586,7 @@ CREATE TABLE finance.invoice_item (
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE finance.invoice_tax (
+CREATE TABLE IF NOT EXISTS finance.invoice_tax (
     id serial PRIMARY KEY,
     invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
     tax_type varchar(30) NOT NULL,
@@ -590,7 +597,7 @@ CREATE TABLE finance.invoice_tax (
     created_at timestamp DEFAULT now()
 );
 
-CREATE TABLE finance.payment (
+CREATE TABLE IF NOT EXISTS finance.payment (
     payment_number varchar(50) PRIMARY KEY,
     invoice_number varchar(50) REFERENCES finance.invoice(invoice_number),
     payment_date timestamp DEFAULT now(),
@@ -605,7 +612,7 @@ CREATE TABLE finance.payment (
     CONSTRAINT chk_payment_status CHECK (status IN ('PENDING','COMPLETED','FAILED'))
 );
 
-CREATE TABLE finance.government_dues (
+CREATE TABLE IF NOT EXISTS finance.government_dues (
     id serial PRIMARY KEY,
     do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
     tax_type varchar(50) NOT NULL,
@@ -619,6 +626,307 @@ CREATE TABLE finance.government_dues (
     updated_at timestamp,
     CONSTRAINT chk_govdues_status CHECK (status IN ('UNPAID','PAID'))
 );
+
+-- -----------------------------------------------------------------------------
+-- 11. SCHEMA: DOCUMENT
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS document.category (
+    code_category varchar(30) PRIMARY KEY,
+    description varchar(255) NOT NULL,
+    is_active boolean DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS document.file_registry (
+    id serial PRIMARY KEY,
+    code_category varchar(30) REFERENCES document.category(code_category),
+    file_name varchar(255) NOT NULL,
+    storage_url text NOT NULL,
+    mime_type varchar(50) NOT NULL,
+    size_kb double precision NOT NULL,
+    is_confidential boolean DEFAULT false,
+    uploaded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    uploaded_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS document.entity_link (
+    id serial PRIMARY KEY,
+    document_id integer REFERENCES document.file_registry(id) ON DELETE CASCADE,
+    reference_document varchar(100) NOT NULL,
+    linked_at timestamp DEFAULT now()
+);
+
+-- -----------------------------------------------------------------------------
+-- 12. SCHEMA: FORM
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS form.sampling_worksheet (
+    no_form varchar(20) PRIMARY KEY,
+    sampling_date date NOT NULL,
+    no_package numeric NOT NULL,
+    type_sample varchar(20) NOT NULL,
+    sample_total numeric NOT NULL,
+    survey_by varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
+    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.sampling_worksheet_detail (
+    no_form varchar(20) REFERENCES form.sampling_worksheet(no_form) ON DELETE CASCADE,
+    no_sample varchar(20) NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    description varchar(255) NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.water_sampling (
+    no_form varchar(20) PRIMARY KEY,
+    sampling_date date NOT NULL,
+    type_sample varchar(20) NOT NULL,
+    total_sample numeric NOT NULL,
+    survey_by varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.volumetric_calc (
+    no_form varchar(20) PRIMARY KEY,
+    no_delivery varchar(20) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
+    empty_draft double precision NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.volumetric_calc_detail (
+    no_form varchar(20) REFERENCES form.volumetric_calc(no_form) ON DELETE CASCADE,
+    calc_type varchar(20) NOT NULL,
+    volume double precision NOT NULL,
+    date_measured date NOT NULL,
+    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_volumetric_calc_type CHECK (calc_type IN ('DRAFT','FINAL'))
+);
+
+CREATE TABLE IF NOT EXISTS form.station_inspection (
+    id serial PRIMARY KEY,
+    code_station varchar(20) REFERENCES enviro.station_info(code_station) ON DELETE CASCADE,
+    code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    inspection_date date NOT NULL,
+    inspection_type varchar(20) NOT NULL,
+    weather_condition text,
+    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.station_inspection_details (
+    id serial PRIMARY KEY,
+    id_inspection integer REFERENCES form.station_inspection(id) ON DELETE CASCADE,
+    equipment_name varchar(50) NOT NULL,
+    equipment_condition text,
+    description text,
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_equipment_condition CHECK (equipment_condition IN ('OK','NOTE OK', 'N/A'))
+);
+
+CREATE TABLE IF NOT EXISTS form.daily_activities (
+    no_form varchar(20) PRIMARY KEY,
+    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
+    activitie_date date NOT NULL,
+    description text NOT NULL,
+    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    created_at date NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS form.daily_activities_details (
+    no_form varchar(20) REFERENCES form.daily_activities(no_form) ON DELETE CASCADE,
+    date_activities date NOT NULL,
+    time_activities time NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    run_hours_in time NOT NULL,
+    run_hours_out time NOT NULL,
+    description text NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.daily_activities_weather (
+    no_form varchar(20) REFERENCES form.daily_activities(no_form) ON DELETE CASCADE,
+    date_weather date NOT NULL,
+    time_weather time NOT NULL,
+    wind_speed numeric NOT NULL,
+    wave_height numeric NOT NULL,
+    description text NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.monitoring_survey (
+    no_form varchar(20) PRIMARY KEY,
+    survey_date date NOT NULL,
+    survey_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    reviewed_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.monitoring_survey_details (
+    id serial PRIMARY KEY,
+    no_form varchar(20) REFERENCES form.monitoring_survey(no_form) ON DELETE CASCADE,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    station_id varchar(20) REFERENCES enviro.station_info(code_station) ON DELETE SET NULL,
+    depth_d numeric NOT NULL,
+    depth_m numeric NOT NULL,
+    time_deploy time NOT NULL,
+    time_undeploy time NOT NULL,
+    description text NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+-- -----------------------------------------------------------------------------
+-- 13. SCHEMA: ENVIRO
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS enviro.station_info (
+    code_station varchar(20) PRIMARY KEY,
+    code_site varchar(20) REFERENCES site.info(code_site),
+    station_type varchar(50) NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    battery_level double precision,
+    last_maintenance date,
+    status varchar(20) DEFAULT 'ACTIVE',
+    created_at timestamp DEFAULT now(),
+    updated_at timestamp,
+    CONSTRAINT chk_station_status CHECK (status IN ('ACTIVE','INACTIVE','MAINTENANCE'))
+);
+
+CREATE TABLE IF NOT EXISTS enviro.station_reading (
+    id serial,
+    code_station varchar(20) REFERENCES enviro.station_info(code_station) ON DELETE CASCADE,
+    record_time timestamp DEFAULT now(),
+    salinity double precision,
+    turbidity double precision,
+    current_speed double precision,
+    dissolved_oxygen double precision,
+    water_density double precision,
+    tide_level double precision,
+    created_at timestamp DEFAULT now(),
+    PRIMARY KEY (id, record_time) 
+) PARTITION BY RANGE (record_time);
+
+-- Partition Station Reading
+CREATE TABLE IF NOT EXISTS enviro.station_reading_202601 PARTITION OF enviro.station_reading
+    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE IF NOT EXISTS enviro.station_reading_202602 PARTITION OF enviro.station_reading
+    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+
+CREATE TABLE IF NOT EXISTS enviro.incident (
+    id serial PRIMARY KEY,
+    code_site varchar(20) REFERENCES site.info(code_site),
+    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
+    reported_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    incident_time timestamp NOT NULL,
+    incident_type varchar(50) NOT NULL,
+    severity varchar(20) NOT NULL,
+    description text NOT NULL,
+    action_taken text,
+    status varchar(20) DEFAULT 'INVESTIGATING',
+    created_at timestamp DEFAULT now(),
+    updated_at timestamp,
+    CONSTRAINT chk_incident_status CHECK (status IN ('INVESTIGATING','RESOLVED','CLOSED'))
+);
+
+CREATE TABLE IF NOT EXISTS enviro.water_quality (
+    id serial PRIMARY KEY,
+    no_form varchar(20) REFERENCES form.water_sampling(no_form) ON DELETE CASCADE,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    depth numeric NOT NULL,
+    brightness numeric NOT NULL,
+    temperature numeric NOT NULL,
+    turbidity numeric NOT NULL,
+    dissolved_oxygen numeric NOT NULL,
+    ph_level numeric NOT NULL,
+    salt numeric NOT NULL,
+    condition varchar(250) NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+
+CREATE TABLE IF NOT EXISTS enviro.parameter_threshold (
+    id serial PRIMARY KEY,
+    parameter_name varchar(50) NOT NULL,
+    parameter_value double precision,
+    uom varchar(10),
+    created_at timestamp DEFAULT now(),
+    updated_at timestamp
+);
+
+CREATE TABLE IF NOT EXISTS enviro.weather_log (
+    id serial PRIMARY KEY,
+    code_site varchar(20) REFERENCES site.info(code_site),
+    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    log_time timestamp DEFAULT now(),
+    weather_condition varchar(50) NOT NULL,
+    wind_speed double precision,
+    wave_height double precision,
+    description text,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS enviro.compliance_report (
+    id serial PRIMARY KEY,
+    report_type varchar(50) NOT NULL,
+    period_start date NOT NULL,
+    period_end date NOT NULL,
+    code_site varchar(20) REFERENCES site.info(code_site),
+    submitted_to varchar(100),
+    submission_date date,
+    report_url text,
+    status varchar(20) DEFAULT 'DRAFT',
+    created_at timestamp DEFAULT now(),
+    updated_at timestamp,
+    CONSTRAINT chk_compliance_status CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','REJECTED'))
+);
+
+-- -----------------------------------------------------------------------------
+-- 14. SCHEMA: AUDIT
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit.activity_log (
+    id serial PRIMARY KEY,
+    code_user varchar(20) NOT NULL,
+    action_type varchar(20) NOT NULL,
+    schema_name varchar(50) NOT NULL,
+    table_name varchar(50) NOT NULL,
+    record_id varchar(50) NOT NULL,
+    old_data jsonb,
+    new_data jsonb,
+    ip_address varchar(50),
+    created_at timestamp DEFAULT now()
+);
+COMMENT ON COLUMN audit.activity_log.code_user IS 'Tidak ada FK ke usr.info karena log dapat mencatat aktivitas sistem atau user yang sudah dihapus.';
+
+CREATE TABLE IF NOT EXISTS audit.error_log (
+    id serial PRIMARY KEY,
+    error_source varchar(50) NOT NULL,
+    error_level varchar(20) NOT NULL,
+    error_message text NOT NULL,
+    stack_trace text,
+    payload_data jsonb,
+    resolved_status boolean DEFAULT false,
+    resolved_at timestamp,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS audit.login_history (
+    id serial PRIMARY KEY,
+    code_user varchar(20) NOT NULL,
+    login_time timestamp DEFAULT now(),
+    ip_address varchar(50),
+    user_agent text,
+    status varchar(20) NOT NULL
+);
+
+-- -----------------------------------------------------------------------------
+-- 15. VIEWS
+-- -----------------------------------------------------------------------------
 
 -- View untuk validasi nilai turunan invoice
 CREATE OR REPLACE VIEW finance.v_invoice_summary AS
@@ -644,179 +952,24 @@ LEFT JOIN (
     GROUP BY invoice_number
 ) tax_sum ON i.invoice_number = tax_sum.invoice_number;
 
--- -----------------------------------------------------------------------------
--- 11. SCHEMA: ENVIRO
--- -----------------------------------------------------------------------------
-CREATE TABLE enviro.buoy_info (
-    code_buoy varchar(20) PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    buoy_type varchar(50) NOT NULL,
-    latitude double precision NOT NULL,
-    longitude double precision NOT NULL,
-    battery_level double precision,
-    last_maintenance date,
-    status varchar(20) DEFAULT 'ACTIVE',
-    created_at timestamp DEFAULT now(),
-    updated_at timestamp,
-    CONSTRAINT chk_buoy_status CHECK (status IN ('ACTIVE','INACTIVE','MAINTENANCE'))
-);
-
-CREATE TABLE enviro.buoy_reading (
-    id serial,
-    code_buoy varchar(20) REFERENCES enviro.buoy_info(code_buoy) ON DELETE CASCADE,
-    record_time timestamp DEFAULT now(),
-    salinity double precision,
-    turbidity double precision,
-    current_speed double precision,
-    dissolved_oxygen double precision,
-    water_density double precision,
-    tide_level double precision,
-    created_at timestamp DEFAULT now(),
-    CONSTRAINT uq_buoy_reading UNIQUE (code_buoy, record_time)
-) PARTITION BY RANGE (record_time);
-
--- Partisi contoh
-CREATE TABLE enviro.buoy_reading_202601 PARTITION OF enviro.buoy_reading
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE enviro.buoy_reading_202602 PARTITION OF enviro.buoy_reading
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
-
-CREATE TABLE enviro.incident (
-    id serial PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
-    reported_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    incident_time timestamp NOT NULL,
-    incident_type varchar(50) NOT NULL,
-    severity varchar(20) NOT NULL,
-    description text NOT NULL,
-    action_taken text,
-    status varchar(20) DEFAULT 'INVESTIGATING',
-    created_at timestamp DEFAULT now(),
-    updated_at timestamp,
-    CONSTRAINT chk_incident_status CHECK (status IN ('INVESTIGATING','RESOLVED','CLOSED'))
-);
-
-CREATE TABLE enviro.water_quality (
-    id serial PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    tested_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    code_partner varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
-    test_date date NOT NULL,
-    tss double precision,
-    ph_level double precision,
-    status varchar(20) DEFAULT 'NORMAL',
-    created_at timestamp DEFAULT now(),
-    CONSTRAINT chk_wq_status CHECK (status IN ('NORMAL','WARNING','CRITICAL'))
-);
-
-CREATE TABLE enviro.water_quality_parameter (
-    id serial PRIMARY KEY,
-    water_quality_id integer REFERENCES enviro.water_quality(id) ON DELETE CASCADE,
-    parameter_name varchar(50) NOT NULL,
-    parameter_value double precision,
-    uom varchar(10),
-    created_at timestamp DEFAULT now()
-);
-
-CREATE TABLE enviro.weather_log (
-    id serial PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    log_time timestamp DEFAULT now(),
-    weather_condition varchar(50) NOT NULL,
-    wind_speed double precision,
-    wave_height double precision,
-    notes text,
-    created_at timestamp DEFAULT now()
-);
-
-CREATE TABLE enviro.compliance_report (
-    id serial PRIMARY KEY,
-    report_type varchar(50) NOT NULL,
-    period_start date NOT NULL,
-    period_end date NOT NULL,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    submitted_to varchar(100),
-    submission_date date,
-    report_url text,
-    status varchar(20) DEFAULT 'DRAFT',
-    created_at timestamp DEFAULT now(),
-    updated_at timestamp,
-    CONSTRAINT chk_compliance_status CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','REJECTED'))
-);
-
--- -----------------------------------------------------------------------------
--- 12. SCHEMA: DOCUMENT
--- -----------------------------------------------------------------------------
-CREATE TABLE document.category (
-    code_category varchar(30) PRIMARY KEY,
-    description varchar(255) NOT NULL,
-    is_active boolean DEFAULT true
-);
-
-CREATE TABLE document.file_registry (
-    id serial PRIMARY KEY,
-    code_category varchar(30) REFERENCES document.category(code_category),
-    file_name varchar(255) NOT NULL,
-    storage_url text NOT NULL,
-    mime_type varchar(50) NOT NULL,
-    size_kb double precision NOT NULL,
-    is_confidential boolean DEFAULT false,
-    uploaded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    uploaded_at timestamp DEFAULT now()
-);
-
-CREATE TABLE document.entity_link (
-    id serial PRIMARY KEY,
-    document_id integer REFERENCES document.file_registry(id) ON DELETE CASCADE,
-    reference_schema varchar(50) NOT NULL,
-    reference_table varchar(50) NOT NULL,
-    reference_id varchar(100) NOT NULL,
-    linked_at timestamp DEFAULT now()
-);
-
--- -----------------------------------------------------------------------------
--- 13. SCHEMA: AUDIT
--- -----------------------------------------------------------------------------
-CREATE TABLE audit.activity_log (
-    id serial PRIMARY KEY,
-    code_user varchar(20) NOT NULL,  -- Tidak ada FK karena bisa mencatat aktivitas sistem atau user yang sudah dihapus
-    action_type varchar(20) NOT NULL,
-    schema_name varchar(50) NOT NULL,
-    table_name varchar(50) NOT NULL,
-    record_id varchar(50) NOT NULL,
-    old_data jsonb,
-    new_data jsonb,
-    ip_address varchar(50),
-    created_at timestamp DEFAULT now()
-);
-COMMENT ON COLUMN audit.activity_log.code_user IS 'Tidak ada FK ke usr.info karena log dapat mencatat aktivitas sistem atau user yang sudah dihapus.';
-
-CREATE TABLE audit.error_log (
-    id serial PRIMARY KEY,
-    error_source varchar(50) NOT NULL,
-    error_level varchar(20) NOT NULL,
-    error_message text NOT NULL,
-    stack_trace text,
-    payload_data jsonb,
-    resolved_status boolean DEFAULT false,
-    resolved_at timestamp,
-    created_at timestamp DEFAULT now()
-);
-
-CREATE TABLE audit.login_history (
-    id serial PRIMARY KEY,
-    code_user varchar(20) NOT NULL,
-    login_time timestamp DEFAULT now(),
-    ip_address varchar(50),
-    user_agent text,
-    status varchar(20) NOT NULL
-);
-
+-- View untuk enviro
+CREATE OR REPLACE VIEW enviro.v_monitoring_enviro AS
+SELECT DISTINCT ON (a.code_station)
+    a.code_station,
+    a.salinity,
+    a.turbidity,
+    a.current_speed,
+    a.dissolved_oxygen,
+    a.water_density,
+    a.tide_level
+FROM 
+    enviro.station_reading a
+ORDER BY 
+    a.code_station, 
+    a.record_time DESC;
 
 -- =============================================================================
--- 14. TRIGGERS, INDEXES, & CONSTRAINTS (FINAL POLISHING)
+-- 16. TRIGGERS, INDEXES, & CONSTRAINTS
 -- =============================================================================
 
 -- A. AUTOMATION TRIGGERS
@@ -840,7 +993,7 @@ CREATE TRIGGER trg_update_deposit_balance
 AFTER INSERT OR UPDATE OR DELETE ON buyer.deposit_ledger
 FOR EACH ROW EXECUTE PROCEDURE update_buyer_deposit_balance();
 
--- D. PERFORMANCE INDEXES (tambahan + existing)
+-- D. PERFORMANCE INDEXES
 CREATE INDEX idx_audit_activity_user ON audit.activity_log (code_user);
 CREATE INDEX idx_audit_activity_table ON audit.activity_log (table_name, record_id);
 CREATE INDEX idx_audit_activity_time ON audit.activity_log (created_at);
@@ -848,25 +1001,29 @@ CREATE INDEX idx_op_do_po ON operational.delivery_order (po_number);
 CREATE INDEX idx_op_do_vessel ON operational.delivery_order (code_vessel_main);
 CREATE INDEX idx_op_survey_do ON operational.cargo_survey (do_number);
 CREATE INDEX idx_op_bl_do ON operational.bill_of_lading (do_number);
-CREATE INDEX idx_fin_invoice_buyer ON finance.invoice (code_buyer);
-CREATE INDEX idx_fin_invoice_partner ON finance.invoice (code_partner);
-CREATE INDEX idx_fin_invoice_do ON finance.invoice (do_number);
+CREATE INDEX idx_fin_inv_buyer ON finance.invoice (code_buyer);
+CREATE INDEX idx_fin_inv_partner ON finance.invoice (code_partner);
+CREATE INDEX idx_fin_inv_do ON finance.invoice (do_number);
+CREATE INDEX idx_fin_inv_del_do ON finance.invoice_delivery_order (do_number);
+CREATE INDEX idx_fin_inv_del_inv ON finance.invoice_delivery_order (invoice_number);
+CREATE INDEX idx_fin_inv_item_inv ON finance.invoice_item (invoice_number);
+CREATE INDEX idx_fin_inv_tax_inv ON finance.invoice_tax (invoice_number);
 CREATE INDEX idx_fin_payment_invoice ON finance.payment (invoice_number);
 CREATE INDEX idx_fin_payment_date ON finance.payment (payment_date);
-CREATE INDEX idx_env_buoy_reading_time ON enviro.buoy_reading (record_time);  -- hanya pada partisi induk, otomatis diwarisi
-CREATE INDEX idx_doc_link_ref ON document.entity_link (reference_schema, reference_table, reference_id);
+CREATE INDEX idx_env_station_reading_time ON enviro.station_reading (record_time);
+CREATE INDEX idx_doc_link_ref ON document.entity_link (reference_document);
 CREATE INDEX idx_vessel_movement_time ON vessel.movement_log (code_vessel, log_time);
 CREATE INDEX idx_env_weather_time ON enviro.weather_log (code_site, log_time);
 CREATE INDEX idx_daily_prod_site ON operational.daily_production (code_site);
 CREATE INDEX idx_daily_prod_vessel ON operational.daily_production (code_vessel);
 CREATE INDEX idx_gov_dues_do ON finance.government_dues (do_number);
 CREATE INDEX idx_op_sofp_do ON operational.statement_of_fact (do_number);
-CREATE INDEX idx_fin_invoice_del_do ON finance.invoice_delivery_order (do_number);
-CREATE INDEX idx_fin_invoice_del_inv ON finance.invoice_delivery_order (invoice_number);
 CREATE INDEX idx_movement_log_do ON vessel.movement_log (do_number);
 CREATE INDEX idx_approval_ref ON operational.approval_log (ref_table, ref_id);
 CREATE INDEX idx_notification_log_time ON param.notification_log (sent_at);
+CREATE INDEX idx_buyer_deposit_ledger ON buyer.deposit_ledger (code_buyer);
+CREATE INDEX idx_env_incident_status ON enviro.incident (status, severity);
 
--- E. CHECK CONSTRAINTS (tambahan untuk tabel yang belum)
+-- E. CHECK CONSTRAINTS
 ALTER TABLE vessel.maintenance ADD CONSTRAINT chk_mt_status CHECK (status IN ('SCHEDULED','IN PROGRESS','COMPLETED','CANCELLED'));
 ALTER TABLE vessel.crew_history ADD CONSTRAINT chk_crew_status CHECK (status IN ('ON_BOARD','SIGNED_OFF'));
