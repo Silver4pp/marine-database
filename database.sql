@@ -13,11 +13,14 @@ CREATE SCHEMA IF NOT EXISTS "finance";
 CREATE SCHEMA IF NOT EXISTS "document";
 CREATE SCHEMA IF NOT EXISTS "audit";
 CREATE SCHEMA IF NOT EXISTS "form";
+CREATE SCHEMA IF NOT EXISTS internal;
 
 -- -----------------------------------------------------------------------------
 -- CREATING EXTENSION
 -- -----------------------------------------------------------------------------
-CREATE EXTENSION IF NOT EXISTS postgis;
+SET search_path = public, extensions;
+CREATE EXTENSION IF NOT EXISTS postgis SCHEMA extensions;
+ALTER DATABASE postgres SET search_path TO "$user", "", public, extensions;
 
 -- -----------------------------------------------------------------------------
 -- SCHEMA: PARAM
@@ -1142,7 +1145,7 @@ CREATE TRIGGER trg_approve_water
 AFTER UPDATE ON enviro.water_sampling_draft
 FOR EACH ROW EXECUTE PROCEDURE fn_approve_water_sampling();
 
-CREATE OR REPLACE FUNCTION automasi_partisi_bulanan()
+CREATE OR REPLACE FUNCTION internal.automasi_partisi_bulanan()
 RETURNS void 
 SECURITY DEFINER 
 SET search_path = ''
@@ -1180,3 +1183,11 @@ BEGIN
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Cabut hak akses dari pihak luar
+REVOKE EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() FROM anon;
+REVOKE EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() FROM authenticated;
+
+-- Berikan kunci eksekusi kepada mesin Supabase (service_role / postgres)
+GRANT EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() TO postgres, service_role;
