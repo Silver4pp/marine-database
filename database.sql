@@ -1,5 +1,5 @@
 -- -----------------------------------------------------------------------------
--- 1. CREATING SCHEMAS
+-- CREATING SCHEMAS
 -- -----------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS "param";
 CREATE SCHEMA IF NOT EXISTS "usr";
@@ -15,193 +15,12 @@ CREATE SCHEMA IF NOT EXISTS "audit";
 CREATE SCHEMA IF NOT EXISTS "form";
 
 -- -----------------------------------------------------------------------------
--- 2. AUTOMATION FUNCTION
+-- CREATING EXTENSION
 -- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE OR REPLACE FUNCTION fn_audit_activity()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_record_id TEXT;
-    v_data JSONB;
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_data := to_jsonb(OLD);
-    ELSE
-        v_data := to_jsonb(NEW);
-    END IF;
-
-    IF TG_NARGS > 0 THEN
-        v_record_id := v_data ->> TG_ARGV[0];
-    END IF;
-
-    IF v_record_id IS NULL THEN
-        v_record_id := COALESCE(
-            v_data->>'id',
-            v_data->>'code_user',
-            v_data->>'code_vessel',
-            v_data->>'code_site',
-            v_data->>'code_partner',
-            v_data->>'code_buyer',
-            v_data->>'po_number',
-            v_data->>'do_number',
-            v_data->>'invoice_number',
-            v_data->>'payment_number',
-            v_data->>'no_form',
-            v_data->>'code_station',
-            v_data->>'code_role',
-            v_data->>'code_type'
-        );
-    END IF;
-
-    IF v_record_id IS NULL THEN
-        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
-    END IF;
-
-    INSERT INTO audit.activity_log (
-        code_user, action_type, schema_name, table_name,
-        record_id, old_data, new_data, ip_address, created_at
-    ) VALUES (
-        COALESCE(current_setting('app.current_user', true), 'SYSTEM'),
-        TG_OP,
-        TG_TABLE_SCHEMA,
-        TG_TABLE_NAME,
-        v_record_id,
-        CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END,
-        CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END,
-        NULL,
-        NOW()
-    );
-    
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION update_buyer_deposit_balance()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_balance NUMERIC(15,2);
-BEGIN
-    SELECT COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE -amount END), 0)
-    INTO v_balance
-    FROM buyer.deposit_ledger
-    WHERE code_buyer = COALESCE(NEW.code_buyer, OLD.code_buyer);
-
-    UPDATE buyer.info
-    SET deposit_balance = v_balance,
-        updated_at = NOW()
-    WHERE code_buyer = COALESCE(NEW.code_buyer, OLD.code_buyer);
-
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION update_buyer_deposit_balance()
-RETURNS TRIGGER 
-SET search_path = '' 
-AS $$
-DECLARE
-    v_balance NUMERIC(15,2);
-    v_target_buyer VARCHAR(20); 
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_target_buyer := OLD.code_buyer;
-    ELSE
-        v_target_buyer := NEW.code_buyer;
-    END IF;
-
-    SELECT COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE -amount END), 0)
-    INTO v_balance
-    FROM buyer.deposit_ledger
-    WHERE code_buyer = v_target_buyer;
-
-    UPDATE buyer.info
-    SET deposit_balance = v_balance,
-        updated_at = NOW()
-    WHERE code_buyer = v_target_buyer;
-
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION fn_audit_activity()
-RETURNS TRIGGER 
-SET search_path = ''
-AS $$
-DECLARE
-    v_record_id TEXT;
-    v_data JSONB;
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_data := to_jsonb(OLD);
-    ELSE
-        v_data := to_jsonb(NEW);
-    END IF;
-
-    IF TG_NARGS > 0 THEN
-        v_record_id := v_data ->> TG_ARGV[0];
-    END IF;
-
-    IF v_record_id IS NULL THEN
-        v_record_id := COALESCE(
-            v_data->>'id',
-            v_data->>'code_user',
-            v_data->>'code_vessel',
-            v_data->>'code_site',
-            v_data->>'code_partner',
-            v_data->>'code_buyer',
-            v_data->>'po_number',
-            v_data->>'do_number',
-            v_data->>'invoice_number',
-            v_data->>'payment_number',
-            v_data->>'no_form',
-            v_data->>'code_station',
-            v_data->>'code_role',
-            v_data->>'code_type'
-        );
-    END IF;
-
-    IF v_record_id IS NULL THEN
-        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
-    END IF;
-
-    INSERT INTO audit.activity_log (
-        code_user, action_type, schema_name, table_name,
-        record_id, old_data, new_data, ip_address, created_at
-    ) VALUES (
-        COALESCE(current_setting('app.current_user', true), 'SYSTEM'),
-        TG_OP,
-        TG_TABLE_SCHEMA,
-        TG_TABLE_NAME,
-        v_record_id,
-        CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END,
-        CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END,
-        NULL,
-        NOW()
-    );
-    
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER 
-SET search_path = '' 
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
+CREATE EXTENSION IF NOT EXISTS postgis;
 
 -- -----------------------------------------------------------------------------
--- 3. SCHEMA: PARAM
+-- SCHEMA: PARAM
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS param.system_config (
     code_config varchar(50) PRIMARY KEY,
@@ -266,7 +85,7 @@ CREATE TABLE IF NOT EXISTS param.organization (
 );
 
 -- -----------------------------------------------------------------------------
--- 4. SCHEMA: USR
+-- SCHEMA: USR
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS usr.role (
     code_role varchar(20) PRIMARY KEY,
@@ -314,7 +133,7 @@ CREATE TABLE IF NOT EXISTS usr.contact (
 );
 
 -- -----------------------------------------------------------------------------
--- 5. SCHEMA: SITE
+-- SCHEMA: SITE
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS site.type (
     code_type varchar(20) PRIMARY KEY,
@@ -331,6 +150,9 @@ CREATE TABLE IF NOT EXISTS site.info (
     city varchar(100),
     latitude double precision NOT NULL,
     longitude double precision NOT NULL,
+    geom geometry(Point, 4326) GENERATED ALWAYS AS (
+        ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+    ) STORED,
     is_active boolean DEFAULT true,
     created_at timestamp DEFAULT now(),
     updated_at timestamp
@@ -350,7 +172,7 @@ CREATE TABLE IF NOT EXISTS site.roster (
 );
 
 -- -----------------------------------------------------------------------------
--- 6. SCHEMA: PARTNER
+-- SCHEMA: PARTNER
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS partner.type (
     code_type varchar(20) PRIMARY KEY,
@@ -383,7 +205,7 @@ CREATE TABLE IF NOT EXISTS partner.contact (
 );
 
 -- -----------------------------------------------------------------------------
--- 7. SCHEMA: VESSEL
+-- SCHEMA: VESSEL
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS vessel.type (
     code_type varchar(20) PRIMARY KEY,
@@ -455,7 +277,7 @@ CREATE TABLE IF NOT EXISTS vessel.maintenance (
 );
 
 -- -----------------------------------------------------------------------------
--- 8. SCHEMA: BUYER
+-- SCHEMA: BUYER
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS buyer.type (
     code_type varchar(20) PRIMARY KEY,
@@ -502,7 +324,7 @@ CREATE TABLE IF NOT EXISTS buyer.deposit_ledger (
 );
 
 -- -----------------------------------------------------------------------------
--- 9. SCHEMA: OPERATIONAL
+-- SCHEMA: OPERATIONAL
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS operational.purchase_order (
     po_number varchar(50) PRIMARY KEY,
@@ -514,6 +336,8 @@ CREATE TABLE IF NOT EXISTS operational.purchase_order (
     total_volume double precision NOT NULL,
     unit_price numeric(15,2) NOT NULL,
     total_amount numeric(15,2) NOT NULL,
+    created_by varchar(20) REFERENCES usr.info(code_user),
+    approved_by varchar(20) REFERENCES usr.info(code_user),
     status varchar(20) DEFAULT 'DRAFT',
     description text,
     created_at timestamp DEFAULT now(),
@@ -598,7 +422,7 @@ CREATE TABLE IF NOT EXISTS operational.statement_of_fact (
 );
 
 -- -----------------------------------------------------------------------------
--- 7B. VESSEL MOVEMENT_LOG
+-- VESSEL MOVEMENT_LOG
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS vessel.movement_log (
     id serial,
@@ -608,20 +432,17 @@ CREATE TABLE IF NOT EXISTS vessel.movement_log (
     status varchar(30) NOT NULL,
     latitude double precision,
     longitude double precision,
+    geom geometry(Point, 4326) GENERATED ALWAYS AS (
+        ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+    ) STORED,
     log_time timestamp DEFAULT now(),
     description text,
     created_at timestamp DEFAULT now(),
     PRIMARY KEY (id, log_time)
 ) PARTITION BY RANGE (log_time);
 
--- Partisi Movement Log
-CREATE TABLE IF NOT EXISTS vessel.movement_log_202601 PARTITION OF vessel.movement_log
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE IF NOT EXISTS vessel.movement_log_202602 PARTITION OF vessel.movement_log
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
-
 -- -----------------------------------------------------------------------------
--- 10. SCHEMA: FINANCE
+-- SCHEMA: FINANCE
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS finance.exchange_rate (
     id serial PRIMARY KEY,
@@ -705,7 +526,7 @@ CREATE TABLE IF NOT EXISTS finance.payment (
     amount numeric(15,2) NOT NULL,
     amount_idr numeric(15,2) NOT NULL,
     reference_code varchar(100),
-    status varchar(20) DEFAULT 'COMPLETED',
+    status varchar(20) DEFAULT 'PENDING',
     created_at timestamp DEFAULT now(),
     CONSTRAINT chk_payment_status CHECK (status IN ('PENDING','COMPLETED','FAILED'))
 );
@@ -726,7 +547,7 @@ CREATE TABLE IF NOT EXISTS finance.government_dues (
 );
 
 -- -----------------------------------------------------------------------------
--- 11. SCHEMA: DOCUMENT
+-- SCHEMA: DOCUMENT
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS document.category (
     code_category varchar(30) PRIMARY KEY,
@@ -754,7 +575,7 @@ CREATE TABLE IF NOT EXISTS document.entity_link (
 );
 
 -- -----------------------------------------------------------------------------
--- 12. SCHEMA: FORM
+-- SCHEMA: FORM
 -- -----------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS form.sampling_worksheet (
@@ -763,12 +584,17 @@ CREATE TABLE IF NOT EXISTS form.sampling_worksheet (
     no_package numeric NOT NULL,
     type_sample varchar(20) NOT NULL,
     sample_total numeric NOT NULL,
-    survey_by varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
+    survey_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
     code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
-    created_at timestamp DEFAULT now()
+    approved_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    remarks_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    status varchar(20) DEFAULT 'SUBMITTED',
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_sws_status CHECK (status IN ('SUBMITTED','APPROVED','REJECTED'))
 );
 
 CREATE TABLE IF NOT EXISTS form.sampling_worksheet_detail (
+    id serial PRIMARY KEY,
     no_form varchar(20) REFERENCES form.sampling_worksheet(no_form) ON DELETE CASCADE,
     no_sample varchar(20) NOT NULL,
     latitude double precision NOT NULL,
@@ -779,11 +605,15 @@ CREATE TABLE IF NOT EXISTS form.sampling_worksheet_detail (
 
 CREATE TABLE IF NOT EXISTS form.water_sampling (
     no_form varchar(20) PRIMARY KEY,
+    public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     sampling_date date NOT NULL,
     type_sample varchar(20) NOT NULL,
     total_sample numeric NOT NULL,
-    survey_by varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
-    created_at timestamp DEFAULT now()
+    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    received_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    status varchar(20) DEFAULT 'SUBMITTED',
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_ws_status CHECK (status IN ('SUBMITTED','APPROVED','RECEIVED','REJECTED'))
 );
 
 CREATE TABLE IF NOT EXISTS form.volumetric_calc (
@@ -794,6 +624,7 @@ CREATE TABLE IF NOT EXISTS form.volumetric_calc (
 );
 
 CREATE TABLE IF NOT EXISTS form.volumetric_calc_detail (
+    id serial PRIMARY KEY,
     no_form varchar(20) REFERENCES form.volumetric_calc(no_form) ON DELETE CASCADE,
     calc_type varchar(20) NOT NULL,
     volume double precision NOT NULL,
@@ -810,8 +641,11 @@ CREATE TABLE IF NOT EXISTS form.station_inspection (
     inspection_date date NOT NULL,
     inspection_type varchar(20) NOT NULL,
     weather_condition text,
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamp DEFAULT now()
+    inspected_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    reviewed_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    status varchar(20) DEFAULT 'SUBMITTED',
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_station_inspection_status CHECK (status IN ('SUBMITTED','REVIEWED','REJECTED'))
 );
 
 CREATE TABLE IF NOT EXISTS form.station_inspection_details (
@@ -830,10 +664,11 @@ CREATE TABLE IF NOT EXISTS form.daily_activities (
     activitie_date date NOT NULL,
     description text NOT NULL,
     recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at date NOT NULL
+    created_at timestamp DEFAULT now ()
 );
 
 CREATE TABLE IF NOT EXISTS form.daily_activities_details (
+    id serial PRIMARY KEY,
     no_form varchar(20) REFERENCES form.daily_activities(no_form) ON DELETE CASCADE,
     date_activities date NOT NULL,
     time_activities time NOT NULL,
@@ -846,6 +681,7 @@ CREATE TABLE IF NOT EXISTS form.daily_activities_details (
 );
 
 CREATE TABLE IF NOT EXISTS form.daily_activities_weather (
+    id serial PRIMARY KEY,
     no_form varchar(20) REFERENCES form.daily_activities(no_form) ON DELETE CASCADE,
     date_weather date NOT NULL,
     time_weather time NOT NULL,
@@ -861,7 +697,9 @@ CREATE TABLE IF NOT EXISTS form.monitoring_survey (
     survey_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
     recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
     reviewed_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamp DEFAULT now()
+    status varchar(20) DEFAULT 'SUBMITTED',
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_monitoring_survey_status CHECK (status IN ('SUBMITTED','REVIEWED','REJECTED'))
 );
 
 CREATE TABLE IF NOT EXISTS form.monitoring_survey_details (
@@ -879,7 +717,7 @@ CREATE TABLE IF NOT EXISTS form.monitoring_survey_details (
 );
 
 -- -----------------------------------------------------------------------------
--- 13. SCHEMA: ENVIRO
+-- SCHEMA: ENVIRO
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS enviro.station_info (
     code_station varchar(20) PRIMARY KEY,
@@ -908,12 +746,6 @@ CREATE TABLE IF NOT EXISTS enviro.station_reading (
     created_at timestamp DEFAULT now(),
     PRIMARY KEY (id, record_time) 
 ) PARTITION BY RANGE (record_time);
-
--- Partition Station Reading
-CREATE TABLE IF NOT EXISTS enviro.station_reading_202601 PARTITION OF enviro.station_reading
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE IF NOT EXISTS enviro.station_reading_202602 PARTITION OF enviro.station_reading
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
 
 CREATE TABLE IF NOT EXISTS enviro.incident (
     id serial PRIMARY KEY,
@@ -945,6 +777,24 @@ CREATE TABLE IF NOT EXISTS enviro.water_quality (
     salt numeric NOT NULL,
     condition varchar(250) NOT NULL,
     created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS enviro.water_sampling_draft (
+    id serial PRIMARY KEY,
+    no_form varchar(20) REFERENCES form.water_sampling(no_form) ON DELETE CASCADE,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    depth numeric NOT NULL,
+    brightness numeric NOT NULL,
+    temperature numeric NOT NULL,
+    turbidity numeric NOT NULL,
+    dissolved_oxygen numeric NOT NULL,
+    ph_level numeric NOT NULL,
+    salt numeric NOT NULL,
+    condition varchar(250) NOT NULL,
+    status VARCHAR(20) DEFAULT 'PENDING', -- PENDING, APPROVED, REJECTED
+    created_by VARCHAR(50),
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 
@@ -985,7 +835,7 @@ CREATE TABLE IF NOT EXISTS enviro.compliance_report (
 );
 
 -- -----------------------------------------------------------------------------
--- 14. SCHEMA: AUDIT
+-- SCHEMA: AUDIT
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS audit.activity_log (
     id serial PRIMARY KEY,
@@ -1023,7 +873,7 @@ CREATE TABLE IF NOT EXISTS audit.login_history (
 );
 
 -- -----------------------------------------------------------------------------
--- 15. VIEWS
+-- VIEWS
 -- -----------------------------------------------------------------------------
 
 -- View untuk validasi nilai turunan invoice
@@ -1067,7 +917,7 @@ ORDER BY
     a.record_time DESC;
 
 -- =============================================================================
--- 16. TRIGGERS, INDEXES, & CONSTRAINTS
+-- TRIGGERS, INDEXES, & CONSTRAINTS
 -- =============================================================================
 
 -- A. AUTOMATION TRIGGERS
@@ -1111,6 +961,10 @@ CREATE INDEX idx_fin_payment_date ON finance.payment (payment_date);
 CREATE INDEX idx_env_station_reading_time ON enviro.station_reading (record_time);
 CREATE INDEX idx_doc_link_ref ON document.entity_link (reference_document);
 CREATE INDEX idx_vessel_movement_time ON vessel.movement_log (code_vessel, log_time);
+CREATE INDEX idx_vessel_movement_geom ON vessel.movement_log USING GIST (geom);
+CREATE INDEX idx_form_sw_detail_geom ON form.sampling_worksheet_detail USING GIST (geom);
+CREATE INDEX idx_form_dailyact_det_geom ON form.daily_activities_details USING GIST (geom);
+CREATE INDEX idx_form_monsurv_det_geom ON form.monitoring_survey_details USING GIST (geom);
 CREATE INDEX idx_env_weather_time ON enviro.weather_log (code_site, log_time);
 CREATE INDEX idx_daily_prod_site ON operational.daily_production (code_site);
 CREATE INDEX idx_daily_prod_vessel ON operational.daily_production (code_vessel);
@@ -1121,7 +975,208 @@ CREATE INDEX idx_approval_ref ON operational.approval_log (ref_table, ref_id);
 CREATE INDEX idx_notification_log_time ON param.notification_log (sent_at);
 CREATE INDEX idx_buyer_deposit_ledger ON buyer.deposit_ledger (code_buyer);
 CREATE INDEX idx_env_incident_status ON enviro.incident (status, severity);
+CREATE INDEX idx_form_sw_detail_no ON form.sampling_worksheet_detail (no_form);
+CREATE INDEX idx_form_volcalc_detail_no ON form.volumetric_calc_detail (no_form);
+CREATE INDEX idx_form_insp_detail_id ON form.station_inspection_details (id_inspection);
+CREATE INDEX idx_form_dailyact_detail_no ON form.daily_activities_details (no_form);
+CREATE INDEX idx_form_dailyact_wea_no ON form.daily_activities_weather (no_form);
+CREATE INDEX idx_form_monsurv_detail_no ON form.monitoring_survey_details (no_form);
+CREATE INDEX idx_form_volcalc_do ON form.volumetric_calc (no_delivery);
+CREATE INDEX idx_form_insp_station ON form.station_inspection (code_station);
+CREATE INDEX idx_form_monsurv_det_station ON form.monitoring_survey_details (station_id); 
+CREATE INDEX idx_form_dailyact_vessel ON form.daily_activities (code_vessel);
+CREATE INDEX idx_form_sw_status_date ON form.sampling_worksheet (status, sampling_date);
+CREATE INDEX idx_form_ws_status_date ON form.water_sampling (status, sampling_date);
+CREATE INDEX idx_form_insp_status_date ON form.station_inspection (status, inspection_date);
+CREATE INDEX idx_form_monsurv_status_date ON form.monitoring_survey (status, survey_date);
+CREATE INDEX idx_form_dailyact_date ON form.daily_activities (activitie_date);
 
 -- E. CHECK CONSTRAINTS
 ALTER TABLE vessel.maintenance ADD CONSTRAINT chk_mt_status CHECK (status IN ('SCHEDULED','IN PROGRESS','COMPLETED','CANCELLED'));
 ALTER TABLE vessel.crew_history ADD CONSTRAINT chk_crew_status CHECK (status IN ('ON_BOARD','SIGNED_OFF'));
+
+-- -----------------------------------------------------------------------------
+-- AUTOMATION FUNCTION
+-- -----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+CREATE OR REPLACE FUNCTION fn_audit_activity()
+RETURNS TRIGGER 
+SET search_path = ''
+AS $$
+DECLARE
+    v_record_id TEXT;
+    v_data JSONB;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_data := to_jsonb(OLD);
+    ELSE
+        v_data := to_jsonb(NEW);
+    END IF;
+
+    IF TG_NARGS > 0 THEN
+        v_record_id := v_data ->> TG_ARGV[0];
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := COALESCE(
+            v_data->>'id',
+            v_data->>'code_user',
+            v_data->>'code_vessel',
+            v_data->>'code_site',
+            v_data->>'code_partner',
+            v_data->>'code_buyer',
+            v_data->>'po_number',
+            v_data->>'do_number',
+            v_data->>'invoice_number',
+            v_data->>'payment_number',
+            v_data->>'no_form',
+            v_data->>'code_station',
+            v_data->>'code_role',
+            v_data->>'code_type'
+        );
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
+    END IF;
+
+    INSERT INTO audit.activity_log (
+        code_user, action_type, schema_name, table_name,
+        record_id, old_data, new_data, ip_address, created_at
+    ) VALUES (
+        COALESCE(current_setting('app.current_user', true), 'SYSTEM'),
+        TG_OP,
+        TG_TABLE_SCHEMA,
+        TG_TABLE_NAME,
+        v_record_id,
+        CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END,
+        CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END,
+        NULL,
+        NOW()
+    );
+    
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION update_buyer_deposit_balance()
+RETURNS TRIGGER 
+SET search_path = '' 
+AS $$
+DECLARE
+    v_balance NUMERIC(15,2);
+    v_target_buyer VARCHAR(20); 
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_target_buyer := OLD.code_buyer;
+    ELSE
+        v_target_buyer := NEW.code_buyer;
+    END IF;
+
+    SELECT COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE -amount END), 0)
+    INTO v_balance
+    FROM buyer.deposit_ledger
+    WHERE code_buyer = v_target_buyer;
+
+    UPDATE buyer.info
+    SET deposit_balance = v_balance,
+        updated_at = NOW()
+    WHERE code_buyer = v_target_buyer;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_approve_water_sampling()
+RETURNS TRIGGER 
+SET search_path = ''
+AS $$
+BEGIN
+    IF NEW.status = 'APPROVED' AND OLD.status != 'APPROVED' THEN
+        INSERT INTO enviro.water_sampling (
+            no_form, 
+            latitude, 
+            longitude, 
+            depth, 
+            brightness, 
+            temperature, 
+            turbidity, 
+            dissolved_oxygen, 
+            ph_level, 
+            salt, 
+            condition, 
+            created_at
+        )
+        SELECT 
+            no_form, 
+            latitude, 
+            longitude, 
+            depth, 
+            brightness, 
+            temperature, 
+            turbidity, 
+            dissolved_oxygen, 
+            ph_level, 
+            salt, 
+            condition, 
+            NOW()
+        FROM enviro.water_sampling_draft 
+        WHERE no_form = NEW.no_form; 
+
+        DELETE FROM enviro.water_sampling_draft
+        WHERE no_form = NEW.no_form;
+
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_approve_water
+AFTER UPDATE ON enviro.water_sampling_draft
+FOR EACH ROW EXECUTE PROCEDURE fn_approve_water_sampling();
+
+CREATE OR REPLACE FUNCTION automasi_partisi_bulanan()
+RETURNS void 
+SECURITY DEFINER 
+SET search_path = ''
+AS $$
+DECLARE
+    v_tabel_induk TEXT;
+    v_daftar_tabel TEXT[] := ARRAY['vessel.movement_log', 'enviro.station_reading'];
+    v_skema TEXT;
+    v_nama_tabel TEXT;
+    v_nama_partisi TEXT;
+    v_waktu_target DATE;
+    v_awal_bulan DATE;
+    v_akhir_bulan DATE;
+BEGIN
+    FOR i IN 0..2 LOOP
+        v_waktu_target := date_trunc('month', CURRENT_DATE + (i || ' month')::interval)::date;
+        v_awal_bulan := v_waktu_target;
+        v_akhir_bulan := v_waktu_target + interval '1 month';
+        FOREACH v_tabel_induk IN ARRAY v_daftar_tabel LOOP
+            v_skema := split_part(v_tabel_induk, '.', 1);
+            v_nama_tabel := split_part(v_tabel_induk, '.', 2);
+            v_nama_partisi := v_nama_tabel || '_' || to_char(v_waktu_target, 'YYYYMM');
+            IF NOT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = v_skema AND c.relname = v_nama_partisi
+            ) THEN
+                EXECUTE format(
+                    'CREATE TABLE %I.%I PARTITION OF %I.%I FOR VALUES FROM (%L) TO (%L);',
+                    v_skema, v_nama_partisi, v_skema, v_nama_tabel, v_awal_bulan, v_akhir_bulan
+                );
+            END IF;
+        END LOOP;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
