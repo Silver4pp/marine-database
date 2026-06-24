@@ -102,6 +102,104 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION update_buyer_deposit_balance()
+RETURNS TRIGGER 
+SET search_path = '' 
+AS $$
+DECLARE
+    v_balance NUMERIC(15,2);
+    v_target_buyer VARCHAR(20); 
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_target_buyer := OLD.code_buyer;
+    ELSE
+        v_target_buyer := NEW.code_buyer;
+    END IF;
+
+    SELECT COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE -amount END), 0)
+    INTO v_balance
+    FROM buyer.deposit_ledger
+    WHERE code_buyer = v_target_buyer;
+
+    UPDATE buyer.info
+    SET deposit_balance = v_balance,
+        updated_at = NOW()
+    WHERE code_buyer = v_target_buyer;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_audit_activity()
+RETURNS TRIGGER 
+SET search_path = ''
+AS $$
+DECLARE
+    v_record_id TEXT;
+    v_data JSONB;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_data := to_jsonb(OLD);
+    ELSE
+        v_data := to_jsonb(NEW);
+    END IF;
+
+    IF TG_NARGS > 0 THEN
+        v_record_id := v_data ->> TG_ARGV[0];
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := COALESCE(
+            v_data->>'id',
+            v_data->>'code_user',
+            v_data->>'code_vessel',
+            v_data->>'code_site',
+            v_data->>'code_partner',
+            v_data->>'code_buyer',
+            v_data->>'po_number',
+            v_data->>'do_number',
+            v_data->>'invoice_number',
+            v_data->>'payment_number',
+            v_data->>'no_form',
+            v_data->>'code_station',
+            v_data->>'code_role',
+            v_data->>'code_type'
+        );
+    END IF;
+
+    IF v_record_id IS NULL THEN
+        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
+    END IF;
+
+    INSERT INTO audit.activity_log (
+        code_user, action_type, schema_name, table_name,
+        record_id, old_data, new_data, ip_address, created_at
+    ) VALUES (
+        COALESCE(current_setting('app.current_user', true), 'SYSTEM'),
+        TG_OP,
+        TG_TABLE_SCHEMA,
+        TG_TABLE_NAME,
+        v_record_id,
+        CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END,
+        CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END,
+        NULL,
+        NOW()
+    );
+    
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER 
+SET search_path = '' 
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 -- -----------------------------------------------------------------------------
 -- 3. SCHEMA: PARAM
 -- -----------------------------------------------------------------------------
