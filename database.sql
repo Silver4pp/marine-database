@@ -719,6 +719,51 @@ CREATE TABLE IF NOT EXISTS form.monitoring_survey_details (
     created_at timestamp DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS form.toolbox_meeting (
+    no_form varchar(20) PRIMARY KEY,
+    survey_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    vessel_code varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
+    work_scope text NOT NULL,
+    equipment_used text NOT NULL,
+    date_form date NOT NULL,
+    time_form time NOT NULL,
+    lokasi text NOT NULL,
+    MoC_needed text NOT NULL DEFAULT 'NO',
+    MoC_approved text NOT NULL DEFAULT 'NO',
+    description text NOT NULL,
+    approved_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    reviewed_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_moc_needed CHECK (MoC_needed IN ('YES','NO'))
+    CONSTRAINT chk_moc_approved CHECK (MoC_approved IN ('YES','NO'))
+);
+
+CREATE TABLE IF NOT EXISTS form.toolbox_meeting_discussed (
+    id serial PRIMARY KEY,
+    no_form varchar(20) REFERENCES form.toolbox_meeting(no_form) ON DELETE CASCADE,
+    topics_discussed text NOT NULL,
+    checklist text NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.toolbox_meeting_action (
+    id serial PRIMARY KEY,
+    no_form varchar(20) REFERENCES form.toolbox_meeting(no_form) ON DELETE CASCADE,
+    action_points text NOT NULL,
+    checklist text NOT NULL,
+    created_at timestamp DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS form.toolbox_meeting_attendees (
+    id serial PRIMARY KEY,
+    no_form varchar(20) REFERENCES form.toolbox_meeting(no_form) ON DELETE CASCADE,
+    name varchar(50) NOT NULL,
+    position varchar(50) NOT NULL,
+    signature text DEFAULT NULL,
+    created_at timestamp DEFAULT now(),
+    CONSTRAINT chk_signature CHECK (signature IN ('YES','NO'))
+);
+
 -- -----------------------------------------------------------------------------
 -- SCHEMA: ENVIRO
 -- -----------------------------------------------------------------------------
