@@ -331,7 +331,6 @@ CREATE TABLE IF NOT EXISTS buyer.deposit_ledger (
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS operational.purchase_order (
     po_number varchar(50) PRIMARY KEY,
-    public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     code_buyer varchar(20) REFERENCES buyer.info(code_buyer),
     po_date date NOT NULL,
     target_completion_date date,
@@ -373,7 +372,6 @@ CREATE TABLE IF NOT EXISTS operational.daily_production (
 
 CREATE TABLE IF NOT EXISTS operational.delivery_order (
     do_number varchar(50) PRIMARY KEY,
-    public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     po_number varchar(50) REFERENCES operational.purchase_order(po_number),
     code_vessel_main varchar(20) REFERENCES vessel.info(code_vessel),
     code_vessel_assist varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
@@ -403,7 +401,6 @@ CREATE TABLE IF NOT EXISTS operational.cargo_survey (
 
 CREATE TABLE IF NOT EXISTS operational.bill_of_lading (
     bl_number varchar(50) PRIMARY KEY,
-    public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
     issue_date date NOT NULL,
     port_of_loading varchar(100) NOT NULL,
@@ -460,7 +457,6 @@ CREATE TABLE IF NOT EXISTS finance.exchange_rate (
 
 CREATE TABLE IF NOT EXISTS finance.invoice (
     invoice_number varchar(50) PRIMARY KEY,
-    public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     invoice_type varchar(20) NOT NULL,
     invoice_category varchar(20) DEFAULT 'FINAL',
     parent_invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE SET NULL,
@@ -608,7 +604,6 @@ CREATE TABLE IF NOT EXISTS form.sampling_worksheet_detail (
 
 CREATE TABLE IF NOT EXISTS form.water_sampling (
     no_form varchar(20) PRIMARY KEY,
-    public_id UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
     sampling_date date NOT NULL,
     type_sample varchar(20) NOT NULL,
     total_sample numeric NOT NULL,
