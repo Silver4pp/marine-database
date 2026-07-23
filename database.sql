@@ -1,1100 +1,1377 @@
--- -----------------------------------------------------------------------------
--- CREATING SCHEMAS
--- -----------------------------------------------------------------------------
-CREATE SCHEMA IF NOT EXISTS "param";
-CREATE SCHEMA IF NOT EXISTS "usr";
-CREATE SCHEMA IF NOT EXISTS "site";
-CREATE SCHEMA IF NOT EXISTS "vessel";
-CREATE SCHEMA IF NOT EXISTS "partner";
-CREATE SCHEMA IF NOT EXISTS "buyer";
-CREATE SCHEMA IF NOT EXISTS "operational";
-CREATE SCHEMA IF NOT EXISTS "enviro";
-CREATE SCHEMA IF NOT EXISTS "finance";
-CREATE SCHEMA IF NOT EXISTS "document";
-CREATE SCHEMA IF NOT EXISTS "audit";
-CREATE SCHEMA IF NOT EXISTS "form";
-CREATE SCHEMA IF NOT EXISTS "internal";
-CREATE SCHEMA IF NOT EXISTS "ref";
-CREATE SCHEMA IF NOT EXISTS "integration";
-CREATE SCHEMA IF NOT EXISTS "reporting";
+-- =============================================================================
+-- DATABASE.MD (FIXED)
+-- =============================================================================
+-- International-Grade Mining & Maritime Operations Database
+-- Conforms to:
+--   ISO 3166-1:2020  (Country)
+--   ISO 4217         (Currency)
+--   ISO 639-1        (Language)
+--   ISO 8601         (Date/Time — PostgreSQL timestamptz)
+--   ISO 19111:2019   (Spatial referencing via PostGIS SRID)
+--   ISO/IEC 27001:2022 (Security — RBAC, RLS, Audit)
+--   IANA Time Zone Database (Timezone)
+--   IMO / MMSI / UN/LOCODE (Maritime identifiers)
+-- =============================================================================
 
--- -----------------------------------------------------------------------------
--- CREATING EXTENSION
--- -----------------------------------------------------------------------------
-SET search_path = public, extensions;
-CREATE EXTENSION IF NOT EXISTS postgis SCHEMA extensions;
-ALTER DATABASE postgres SET search_path TO "$user", "", public, extensions;
+-- =============================================================================
+-- 1. EXTENSIONS
+-- =============================================================================
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_cron;
 
-CREATE EXTENSION IF NOT EXISTS pg_cron SCHEMA extensions;
-CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+-- =============================================================================
+-- 2. SCHEMAS
+-- =============================================================================
 
--- -----------------------------------------------------------------------------
--- SCHEMA: PARAM
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS param.system_config (
-    code_config varchar(50) PRIMARY KEY,
-    config_value text NOT NULL,
-    description text,
-    is_secure boolean DEFAULT false,
-    updated_by varchar(20),
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
+-- Core master data & global reference
+CREATE SCHEMA IF NOT EXISTS core;
+CREATE SCHEMA IF NOT EXISTS ref;    
 
-CREATE TABLE IF NOT EXISTS param.dropdown_list (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    category varchar(50) NOT NULL,
-    code_value varchar(50) NOT NULL,
-    display_label varchar(100) NOT NULL,
-    sort_order integer DEFAULT 0,
-    is_active boolean DEFAULT true,
-    CONSTRAINT uq_dropdown UNIQUE (category, code_value)
-);
+-- Maritime & Fleet
+CREATE SCHEMA IF NOT EXISTS fleet;
+CREATE SCHEMA IF NOT EXISTS port;
 
-CREATE TABLE IF NOT EXISTS param.notification_template (
-    code_template varchar(50) PRIMARY KEY,
-    platform varchar(20) NOT NULL,
-    message_body text NOT NULL,
-    is_active boolean DEFAULT true,
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
+-- Commercial & Logistics
+CREATE SCHEMA IF NOT EXISTS commercial;
+CREATE SCHEMA IF NOT EXISTS logistics;
+CREATE SCHEMA IF NOT EXISTS voyage;
 
-CREATE TABLE IF NOT EXISTS param.notification_log (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_template varchar(50) REFERENCES param.notification_template(code_template),
-    recipient varchar(100) NOT NULL,
-    sent_at timestamptz NOT NULL DEFAULT now(),
-    status varchar(20) DEFAULT 'SENT',
-    error_message text,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
+-- Regulatory & Compliance
+CREATE SCHEMA IF NOT EXISTS regulatory;
 
-CREATE TABLE IF NOT EXISTS param.abbreviation (
-    code_abbr varchar(50) PRIMARY KEY,
-    full_name varchar(255) NOT NULL,
-    category varchar(50),
-    description text,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
-);
+-- Operations
+CREATE SCHEMA IF NOT EXISTS operations;
 
-CREATE TABLE IF NOT EXISTS param.uom (
-    code_uom varchar(10) PRIMARY KEY,
-    name varchar(50) NOT NULL,
-    description text,
-    is_active boolean DEFAULT true
-);
+-- Cargo & Quantity
+CREATE SCHEMA IF NOT EXISTS cargo;
 
-CREATE TABLE IF NOT EXISTS param.organization (
-    code_org varchar(20) PRIMARY KEY,
-    name varchar(100) NOT NULL,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
-);
+-- Survey & Sampling
+CREATE SCHEMA IF NOT EXISTS survey;
 
-CREATE TABLE IF NOT EXISTS param.threshold (
-    code_threshold varchar(20) PRIMARY KEY,
-    description text,
-    code_uom varchar(10) REFERENCES param.uom(code_uom),
-    nominal_limit numeric(20,6) NOT NULL,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
-);
+-- Tracking & Environment
+CREATE SCHEMA IF NOT EXISTS tracking;
+CREATE SCHEMA IF NOT EXISTS environment;
 
--- -----------------------------------------------------------------------------
--- SCHEMA: REF (international reference data — ISO standards)
--- -----------------------------------------------------------------------------
+-- Finance
+CREATE SCHEMA IF NOT EXISTS finance;
+
+-- Documents
+CREATE SCHEMA IF NOT EXISTS documents;
+
+-- Security & Audit
+CREATE SCHEMA IF NOT EXISTS security;
+CREATE SCHEMA IF NOT EXISTS audit;
+
+-- Integration
+CREATE SCHEMA IF NOT EXISTS integration;
+
+-- Reporting (Read-only views / materialized views)
+CREATE SCHEMA IF NOT EXISTS reporting;
+
+-- Internal automation (partition management, etc.)
+CREATE SCHEMA IF NOT EXISTS internal;
+
+-- =============================================================================
+-- 3. GLOBAL REFERENCE DATA (ISO Standards)
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 3.1 Country — ISO 3166-1:2020
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ref.country (
-    country_code char(2) PRIMARY KEY,      -- ISO 3166-1 alpha-2
-    country_name text NOT NULL,
-    iso3_code char(3),
-    numeric_code char(3),
-    is_active boolean NOT NULL DEFAULT true
+    country_id          smallint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    iso_alpha2          char(2) NOT NULL UNIQUE,
+    iso_alpha3          char(3) NOT NULL UNIQUE,
+    iso_numeric         char(3) NOT NULL UNIQUE,
+    name                varchar(100) NOT NULL,
+    official_name       varchar(200),
+    status              varchar(20) NOT NULL DEFAULT 'ACTIVE',
+    valid_from          date NOT NULL DEFAULT CURRENT_DATE,
+    valid_to            date,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_country_status CHECK (status IN ('ACTIVE','INACTIVE','RESERVED')),
+    CONSTRAINT chk_country_valid CHECK (valid_to IS NULL OR valid_to >= valid_from)
 );
 
+COMMENT ON TABLE ref.country IS 'ISO 3166-1:2020 — Country codes';
+
+-- ---------------------------------------------------------------------------
+-- 3.2 Currency — ISO 4217
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ref.currency (
-    currency_code char(3) PRIMARY KEY,     -- ISO 4217
-    currency_name text NOT NULL,
-    minor_unit smallint NOT NULL DEFAULT 2,
-    is_active boolean NOT NULL DEFAULT true
+    currency_code       char(3) PRIMARY KEY,
+    currency_name       varchar(100) NOT NULL,
+    currency_symbol     varchar(10),
+    minor_unit          smallint NOT NULL DEFAULT 2,
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
 
+COMMENT ON TABLE ref.currency IS 'ISO 4217 — Currency codes';
+
+-- ---------------------------------------------------------------------------
+-- 3.3 Language — ISO 639-1
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ref.language (
-    language_code char(2) PRIMARY KEY,     -- ISO 639-1
-    language_name text NOT NULL,
-    is_active boolean NOT NULL DEFAULT true
+    language_code       char(2) PRIMARY KEY,
+    language_name       varchar(100) NOT NULL,
+    native_name         varchar(100),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
 
--- Reference table for controlled status vocabularies (Section 24). This is
--- documentation/validation metadata, NOT a replacement for the existing
--- varchar + CHECK constraint pattern already used across the schema (that
--- pattern is simple, fast, and adequate for this system's scale). Use this
--- table if the application needs to look up allowed statuses + descriptions
--- dynamically (e.g. for UI dropdowns) rather than hardcoding them.
+COMMENT ON TABLE ref.language IS 'ISO 639-1 — Language codes';
+
+-- ---------------------------------------------------------------------------
+-- 3.4 Timezone — IANA Time Zone Database
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ref.timezone (
+    timezone_id         varchar(50) PRIMARY KEY,
+    iana_name           varchar(100) NOT NULL UNIQUE,
+    utc_offset          varchar(6),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE ref.timezone IS 'IANA Time Zone Database';
+
+-- ---------------------------------------------------------------------------
+-- 3.5 Unit of Measure
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ref.unit_of_measure (
+    uom_code            varchar(10) PRIMARY KEY,
+    name                varchar(100) NOT NULL,
+    category            varchar(50) NOT NULL,  -- volume, weight, length, etc.
+    symbol              varchar(10),
+    si_unit             boolean NOT NULL DEFAULT false,
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE ref.unit_of_measure IS 'Unit of measure master — Metric, Imperial, Maritime';
+
+CREATE TABLE IF NOT EXISTS ref.unit_conversion (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    uom_from            varchar(10) NOT NULL REFERENCES ref.unit_of_measure(uom_code),
+    uom_to              varchar(10) NOT NULL REFERENCES ref.unit_of_measure(uom_code),
+    conversion_factor   numeric(20,10) NOT NULL,
+    conversion_formula  varchar(200),
+    valid_from          date NOT NULL DEFAULT CURRENT_DATE,
+    valid_to            date,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_conversion_valid CHECK (valid_to IS NULL OR valid_to >= valid_from),
+    CONSTRAINT uq_conversion UNIQUE (uom_from, uom_to, valid_from)
+);
+
+COMMENT ON TABLE ref.unit_conversion IS 'Unit conversion factors with temporal validity';
+
+-- ---------------------------------------------------------------------------
+-- 3.6 Status Vocabulary (controlled vocabulary)
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ref.status (
-    status_group varchar(50) NOT NULL,
-    status_code varchar(50) NOT NULL,
-    description text,
-    is_active boolean NOT NULL DEFAULT true,
+    status_group        varchar(50) NOT NULL,
+    status_code         varchar(50) NOT NULL,
+    description         text,
+    is_active           boolean NOT NULL DEFAULT true,
+    sort_order          integer DEFAULT 0,
+    created_at          timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (status_group, status_code)
 );
 
--- Seed: only the currencies/countries this business actually operates with.
--- Extend as needed — do not blindly seed the full ISO list if unused.
-INSERT INTO ref.currency (currency_code, currency_name, minor_unit) VALUES
-    ('IDR', 'Indonesian Rupiah', 2),
-    ('USD', 'US Dollar', 2),
-    ('SGD', 'Singapore Dollar', 2)
+COMMENT ON TABLE ref.status IS 'Controlled status vocabulary for all entities';
+
+-- ---------------------------------------------------------------------------
+-- 3.7 Seed Data — ISO reference data
+-- ---------------------------------------------------------------------------
+INSERT INTO ref.country (iso_alpha2, iso_alpha3, iso_numeric, name, official_name) VALUES
+    ('ID', 'IDN', '360', 'Indonesia', 'Republic of Indonesia'),
+    ('SG', 'SGP', '702', 'Singapore', 'Republic of Singapore'),
+    ('MY', 'MYS', '458', 'Malaysia', 'Malaysia'),
+    ('CN', 'CHN', '156', 'China', 'People''s Republic of China'),
+    ('JP', 'JPN', '392', 'Japan', 'Japan'),
+    ('KR', 'KOR', '410', 'South Korea', 'Republic of Korea'),
+    ('IN', 'IND', '356', 'India', 'Republic of India'),
+    ('AU', 'AUS', '036', 'Australia', 'Commonwealth of Australia'),
+    ('US', 'USA', '840', 'United States', 'United States of America'),
+    ('GB', 'GBR', '826', 'United Kingdom', 'United Kingdom of Great Britain and Northern Ireland'),
+    ('NL', 'NLD', '528', 'Netherlands', 'Kingdom of the Netherlands'),
+    ('PH', 'PHL', '608', 'Philippines', 'Republic of the Philippines'),
+    ('TH', 'THA', '764', 'Thailand', 'Kingdom of Thailand'),
+    ('VN', 'VNM', '704', 'Vietnam', 'Socialist Republic of Vietnam'),
+    ('HK', 'HKG', '344', 'Hong Kong', 'Hong Kong Special Administrative Region of China')
+ON CONFLICT (iso_alpha2) DO NOTHING;
+
+INSERT INTO ref.currency (currency_code, currency_name, currency_symbol, minor_unit) VALUES
+    ('IDR', 'Indonesian Rupiah', 'Rp', 2),
+    ('USD', 'US Dollar', '$', 2),
+    ('SGD', 'Singapore Dollar', 'S$', 2),
+    ('CNY', 'Chinese Yuan', '¥', 2),
+    ('JPY', 'Japanese Yen', '¥', 0),
+    ('KRW', 'South Korean Won', '₩', 0),
+    ('INR', 'Indian Rupee', '₹', 2),
+    ('EUR', 'Euro', '€', 2),
+    ('GBP', 'British Pound', '£', 2),
+    ('AUD', 'Australian Dollar', 'A$', 2),
+    ('HKD', 'Hong Kong Dollar', 'HK$', 2),
+    ('MYR', 'Malaysian Ringgit', 'RM', 2),
+    ('PHP', 'Philippine Peso', '₱', 2),
+    ('THB', 'Thai Baht', '฿', 2),
+    ('VND', 'Vietnamese Đồng', '₫', 0)
 ON CONFLICT (currency_code) DO NOTHING;
 
-INSERT INTO ref.country (country_code, country_name, iso3_code, numeric_code) VALUES
-    ('ID', 'Indonesia', 'IDN', '360'),
-    ('SG', 'Singapore', 'SGP', '702'),
-    ('MY', 'Malaysia', 'MYS', '458')
-ON CONFLICT (country_code) DO NOTHING;
+INSERT INTO ref.language (language_code, language_name) VALUES
+    ('id', 'Indonesian'),
+    ('en', 'English'),
+    ('zh', 'Chinese'),
+    ('ja', 'Japanese'),
+    ('ko', 'Korean'),
+    ('hi', 'Hindi'),
+    ('ms', 'Malay'),
+    ('th', 'Thai'),
+    ('vi', 'Vietnamese'),
+    ('nl', 'Dutch'),
+    ('ar', 'Arabic')
+ON CONFLICT (language_code) DO NOTHING;
 
--- -----------------------------------------------------------------------------
--- SCHEMA: USR
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS usr.role (
-    code_role varchar(20) PRIMARY KEY,
-    description text,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+INSERT INTO ref.timezone (timezone_id, iana_name, utc_offset) VALUES
+    ('TZ-JKT', 'Asia/Jakarta', '+07:00'),
+    ('TZ-MKS', 'Asia/Makassar', '+08:00'),
+    ('TZ-JAY', 'Asia/Jayapura', '+09:00'),
+    ('TZ-SIN', 'Asia/Singapore', '+08:00'),
+    ('TZ-KUL', 'Asia/Kuala_Lumpur', '+08:00'),
+    ('TZ-BEJ', 'Asia/Shanghai', '+08:00'),
+    ('TZ-TOK', 'Asia/Tokyo', '+09:00'),
+    ('TZ-SEL', 'Asia/Seoul', '+09:00'),
+    ('TZ-DEL', 'Asia/Kolkata', '+05:30'),
+    ('TZ-LON', 'Europe/London', '+00:00'),
+    ('TZ-UTC', 'UTC', '+00:00')
+ON CONFLICT (iana_name) DO NOTHING;
+
+INSERT INTO ref.unit_of_measure (uom_code, name, category, symbol, si_unit) VALUES
+    ('MT',   'Metric Ton',       'weight', 't',    true),
+    ('KG',   'Kilogram',         'weight', 'kg',   true),
+    ('M3',   'Cubic Meter',      'volume', 'm³',   true),
+    ('L',    'Liter',            'volume', 'L',    false),
+    ('BBL',  'Barrel',           'volume', 'bbl',  false),
+    ('TON',  'Long Ton',         'weight', 'ton',  false),
+    ('LB',   'Pound',            'weight', 'lb',   false),
+    ('FT',   'Foot',             'length', 'ft',   false),
+    ('M',    'Meter',            'length', 'm',    true),
+    ('NM',   'Nautical Mile',    'length', 'nmi',  false),
+    ('KT',   'Knot',             'speed',  'kn',   false),
+    ('PCT',  'Percentage',       'ratio',  '%',    false)
+ON CONFLICT (uom_code) DO NOTHING;
+
+INSERT INTO ref.unit_conversion (uom_from, uom_to, conversion_factor) VALUES
+    ('MT', 'KG',  1000.0),
+    ('MT', 'LB',  2204.62),
+    ('TON', 'MT', 1.01604691),
+    ('M3', 'L',   1000.0),
+    ('FT', 'M',   0.3048),
+    ('NM', 'M',   1852.0)
+ON CONFLICT (uom_from, uom_to, valid_from) DO NOTHING;
+
+-- =============================================================================
+-- 4. CORE MASTER DATA
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 4.1 Organization
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.organization (
+    org_code            varchar(20) PRIMARY KEY,
+    name                varchar(200) NOT NULL,
+    business_type       varchar(50),
+    country_id          smallint REFERENCES ref.country(country_id),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
 );
 
-CREATE TABLE IF NOT EXISTS usr.permission (
-    code_permission varchar(50) PRIMARY KEY,
-    module varchar(50) NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+-- ---------------------------------------------------------------------------
+-- 4.2 Business Unit
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.business_unit (
+    bu_code             varchar(20) PRIMARY KEY,
+    org_code            varchar(20) NOT NULL REFERENCES core.organization(org_code),
+    name                varchar(200) NOT NULL,
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
 );
 
-CREATE TABLE IF NOT EXISTS usr.role_permission (
-    code_role varchar(20) REFERENCES usr.role(code_role) ON DELETE CASCADE,
-    code_permission varchar(50) REFERENCES usr.permission(code_permission) ON DELETE CASCADE,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (code_role, code_permission)
+-- ---------------------------------------------------------------------------
+-- 4.3 Partner (unified — replaces partner.info and buyer.info)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS core.partner (
+    partner_id          varchar(20) PRIMARY KEY,
+    name                varchar(200) NOT NULL,
+    legal_name          varchar(200),
+    tax_id              varchar(50),
+    registration_number varchar(50),
+    country_id          smallint REFERENCES ref.country(country_id),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
 );
 
-CREATE TABLE IF NOT EXISTS usr.info (
-    code_user varchar(20) PRIMARY KEY,
-    password_hash varchar(255) NOT NULL,
-    name varchar(100) NOT NULL,
-    citizen varchar(20) NOT NULL,
-    role varchar(20) REFERENCES usr.role(code_role),
-    organization varchar(20) REFERENCES param.organization(code_org),
-    is_active boolean DEFAULT true,
-    last_login timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    deleted_at timestamptz
+COMMENT ON TABLE core.partner IS 'Unified partner entity — Owner, Operator, Charterer, Buyer, Seller, Agent, Surveyor, Laboratory, etc.';
+
+CREATE TABLE IF NOT EXISTS core.partner_role (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    partner_id          varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    role_code           varchar(30) NOT NULL,
+    valid_from          date NOT NULL DEFAULT CURRENT_DATE,
+    valid_to            date,
+    is_current          boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_partner_role CHECK (role_code IN (
+        'OWNER','OPERATOR','CHARTERER','AGENT','BUYER','SELLER',
+        'SURVEYOR','LABORATORY','PORT_AGENT','CUSTOMS_AGENT','STEVEDORE',
+        'SHIPPER','CONSIGNEE','NOTIFY_PARTY','BROKER','FORWARDER'
+    )),
+    CONSTRAINT uq_partner_role UNIQUE (partner_id, role_code, valid_from)
 );
 
-CREATE TABLE IF NOT EXISTS usr.contact (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE CASCADE,
-    contact_type varchar(30) NOT NULL,
-    contact_value varchar(100) NOT NULL,
-    is_primary boolean DEFAULT false,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
-);
+COMMENT ON TABLE core.partner_role IS 'Temporal partner roles — supports role history';
 
--- -----------------------------------------------------------------------------
--- SCHEMA: SITE
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS site.type (
-    code_type varchar(20) PRIMARY KEY,
-    description text,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS site.info (
-    code_site varchar(20) PRIMARY KEY,
-    code_type varchar(20) REFERENCES site.type(code_type),
-    name varchar(100) NOT NULL,
-    address text,
-    city varchar(100),
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    geom geometry(Point, 4326) GENERATED ALWAYS AS (
-        ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
+CREATE TABLE IF NOT EXISTS core.partner_address (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    partner_id          varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    address_type        varchar(20) NOT NULL DEFAULT 'BUSINESS',
+    address_line1       varchar(200) NOT NULL,
+    address_line2       varchar(200),
+    city                varchar(100),
+    state_province      varchar(100),
+    postal_code         varchar(20),
+    country_id          smallint REFERENCES ref.country(country_id),
+    is_primary          boolean NOT NULL DEFAULT false,
+    latitude            numeric(10,7),
+    longitude           numeric(10,7),
+    geom                geometry(Point, 4326) GENERATED ALWAYS AS (
+        CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL
+             THEN ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
+             ELSE NULL END
     ) STORED,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+    valid_from          date NOT NULL DEFAULT CURRENT_DATE,
+    valid_to            date,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_address_type CHECK (address_type IN ('BUSINESS','BILLING','SHIPPING','REGISTERED','CORRESPONDENCE'))
 );
 
-CREATE TABLE IF NOT EXISTS site.roster (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site) ON DELETE CASCADE,
-    code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE CASCADE,
-    work_date date NOT NULL,
-    is_pic boolean DEFAULT false,
-    shift varchar(20) NOT NULL,
-    status varchar(20) DEFAULT 'SCHEDULED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT roster_prevent_double_booking UNIQUE (code_user, work_date, shift)
+CREATE TABLE IF NOT EXISTS core.partner_contact (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    partner_id          varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    contact_name        varchar(100),
+    contact_type        varchar(20) NOT NULL,
+    contact_value       varchar(200) NOT NULL,
+    is_primary          boolean NOT NULL DEFAULT false,
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_contact_type CHECK (contact_type IN ('EMAIL','PHONE','MOBILE','FAX','WEBSITE','TELEX'))
 );
 
--- -----------------------------------------------------------------------------
--- SCHEMA: PARTNER
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS partner.type (
-    code_type varchar(20) PRIMARY KEY,
-    description text,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now()
+-- ---------------------------------------------------------------------------
+-- 4.4 Port — with UN/LOCODE reference
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS port.port (
+    port_id             varchar(10) PRIMARY KEY,
+    un_locode           varchar(5) UNIQUE,
+    name                varchar(200) NOT NULL,
+    country_id          smallint NOT NULL REFERENCES ref.country(country_id),
+    longitude           numeric(10,7),
+    latitude            numeric(10,7),
+    geom                geometry(Point, 4326) GENERATED ALWAYS AS (
+        CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL
+             THEN ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
+             ELSE NULL END
+    ) STORED,
+    timezone_id         varchar(50) REFERENCES ref.timezone(timezone_id),
+    port_type           varchar(30) NOT NULL DEFAULT 'SEAPORT',
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_port_type CHECK (port_type IN ('SEAPORT','RIVER_PORT','INLAND_PORT','FISHING_PORT','MILITARY_PORT'))
 );
 
-CREATE TABLE IF NOT EXISTS partner.info (
-    code_partner varchar(20) PRIMARY KEY,
-    code_type varchar(20) REFERENCES partner.type(code_type),
-    name varchar(100) NOT NULL,
-    address text,
-    city varchar(50),
-    country char(2) REFERENCES ref.country(country_code),
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+COMMENT ON TABLE port.port IS 'Port master with UN/LOCODE — covers all countries';
+
+CREATE TABLE IF NOT EXISTS port.terminal (
+    terminal_id         varchar(20) PRIMARY KEY,
+    port_id             varchar(10) NOT NULL REFERENCES port.port(port_id),
+    name                varchar(200) NOT NULL,
+    operator_partner_id varchar(20) REFERENCES core.partner(partner_id),
+    cargo_type          varchar(50),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
 );
 
-CREATE TABLE IF NOT EXISTS partner.contact (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_partner varchar(20) REFERENCES partner.info(code_partner) ON DELETE CASCADE,
-    pic_name varchar(100),
-    contact_type varchar(30) NOT NULL,
-    contact_value varchar(100) NOT NULL,
-    is_primary boolean DEFAULT false,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+-- ---------------------------------------------------------------------------
+-- 4.5 Site (Mining/Operations Site — linked to Work Area)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS operations.site (
+    site_code           varchar(20) PRIMARY KEY,
+    name                varchar(200) NOT NULL,
+    org_code            varchar(20) REFERENCES core.organization(org_code),
+    country_id          smallint REFERENCES ref.country(country_id),
+    latitude            numeric(10,7),
+    longitude           numeric(10,7),
+    geom                geometry(Point, 4326) GENERATED ALWAYS AS (
+        CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL
+             THEN ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
+             ELSE NULL END
+    ) STORED,
+    timezone_id         varchar(50) REFERENCES ref.timezone(timezone_id),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
 );
 
--- -----------------------------------------------------------------------------
--- SCHEMA: VESSEL
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS vessel.type (
-    code_type varchar(20) PRIMARY KEY,
-    description text,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now()
+-- =============================================================================
+-- 5. FLEET & VESSEL
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 5.1 Vessel Type (IMO ship type classification)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fleet.vessel_type (
+    vessel_type_code    varchar(20) PRIMARY KEY,
+    name                varchar(100) NOT NULL,
+    description         text,
+    is_active           boolean NOT NULL DEFAULT true
 );
 
-CREATE TABLE IF NOT EXISTS vessel.info (
-    code_vessel varchar(20) PRIMARY KEY,
-    code_partner varchar(20) REFERENCES partner.info(code_partner),
-    code_type varchar(20) REFERENCES vessel.type(code_type),
-    name varchar(100) NOT NULL,
-    imo_number varchar(20) UNIQUE,
-    call_sign varchar(20) UNIQUE,
-    flag char(2) REFERENCES ref.country(country_code),
-    grt numeric(20,6),
-    dwt numeric(20,6),
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+INSERT INTO fleet.vessel_type (vessel_type_code, name) VALUES
+    ('BULK_CARRIER', 'Bulk Carrier'),
+    ('TANKER', 'Tanker'),
+    ('CONTAINER', 'Container Ship'),
+    ('GENERAL_CARGO', 'General Cargo'),
+    ('BARGE', 'Barge'),
+    ('TUG', 'Tugboat'),
+    ('FPSO', 'Floating Production Storage Offloading'),
+    ('OSV', 'Offshore Support Vessel'),
+    ('DREDGER', 'Dredger'),
+    ('LNG', 'LNG Carrier')
+ON CONFLICT (vessel_type_code) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- 5.2 Vessel
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fleet.vessel (
+    vessel_id           varchar(20) PRIMARY KEY,
+    imo_number          varchar(10) UNIQUE,
+    mmsi                varchar(9) UNIQUE,
+    call_sign           varchar(20) UNIQUE,
+    name                varchar(200) NOT NULL,
+    former_name         varchar(200),
+    vessel_type_code    varchar(20) REFERENCES fleet.vessel_type(vessel_type_code),
+    flag_country_id     smallint REFERENCES ref.country(country_id),
+    year_built          smallint,
+    grt                 numeric(12,2),   -- Gross Registered Tonnage
+    nrt                 numeric(12,2),   -- Net Registered Tonnage
+    dwt                 numeric(12,2),   -- Deadweight Tonnage
+    loa                 numeric(10,2),   -- Length Overall (meters)
+    beam                numeric(10,2),   -- Breadth (meters)
+    draft_max           numeric(10,2),   -- Maximum Draft (meters)
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
 );
 
-CREATE TABLE IF NOT EXISTS vessel.site_assignment (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    start_date date NOT NULL,
-    end_date date,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_site_assignment_dates CHECK (end_date IS NULL OR end_date >= start_date)
+COMMENT ON TABLE fleet.vessel IS 'Vessel master — IMO Number is the primary global identifier. MMSI for AIS tracking.';
+
+-- ---------------------------------------------------------------------------
+-- 5.3 Vessel Partner Relationship (temporal)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fleet.vessel_partner (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id           varchar(20) NOT NULL REFERENCES fleet.vessel(vessel_id),
+    partner_id          varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    role_code           varchar(30) NOT NULL,
+    valid_from          date NOT NULL DEFAULT CURRENT_DATE,
+    valid_to            date,
+    is_current          boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_vp_role CHECK (role_code IN ('OWNER','OPERATOR','CHARTERER','MANAGER','TECHNICAL_MANAGER')),
+    CONSTRAINT uq_vessel_partner UNIQUE (vessel_id, partner_id, role_code, valid_from)
 );
 
-CREATE TABLE IF NOT EXISTS vessel.certificate (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    name varchar(100) NOT NULL,
-    issuer varchar(100) NOT NULL,
-    issued_date date NOT NULL,
-    expiry_date date NOT NULL,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+COMMENT ON TABLE fleet.vessel_partner IS 'Temporal vessel-partner relationship — never store owner/operator as columns on vessel.';
+
+-- ---------------------------------------------------------------------------
+-- 5.4 Vessel Certificate
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS fleet.vessel_certificate (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id           varchar(20) NOT NULL REFERENCES fleet.vessel(vessel_id),
+    certificate_type    varchar(50) NOT NULL,
+    certificate_number  varchar(100),
+    issuing_authority   varchar(200),
+    issued_date         date NOT NULL,
+    expiry_date         date NOT NULL,
+    status              varchar(20) NOT NULL DEFAULT 'ACTIVE',
+    document_id         bigint,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_cert_status CHECK (status IN ('ACTIVE','EXPIRED','REVOKED','SUSPENDED')),
+    CONSTRAINT chk_cert_dates CHECK (expiry_date >= issued_date)
 );
 
-CREATE TABLE IF NOT EXISTS vessel.crew_history (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE CASCADE,
-    position varchar(50) NOT NULL,
-    sign_on_date date NOT NULL,
-    sign_off_date date,
-    status varchar(20) DEFAULT,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+-- =============================================================================
+-- 6. COMMERCIAL
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 6.1 Purchase Order
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS commercial.purchase_order (
+    po_number           varchar(50) PRIMARY KEY,
+    buyer_partner_id    varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    seller_partner_id   varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    contract_number     varchar(50),
+    po_date             date NOT NULL,
+    commodity           varchar(100) NOT NULL,
+    uom_code            varchar(10) NOT NULL REFERENCES ref.unit_of_measure(uom_code),
+    total_volume        numeric(20,6) NOT NULL,
+    unit_price          numeric(18,4) NOT NULL,
+    currency_code       char(3) NOT NULL REFERENCES ref.currency(currency_code),
+    total_amount        numeric(18,4) NOT NULL,
+    incoterm            varchar(10),
+    port_of_loading     varchar(10) REFERENCES port.port(port_id),
+    port_of_discharge   varchar(10) REFERENCES port.port(port_id),
+    target_start_date   date,
+    target_end_date     date,
+    status              varchar(30) NOT NULL DEFAULT 'DRAFT',
+    description         text,
+    created_by          varchar(20),
+    approved_by         varchar(20),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_po_status CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','IN_PROGRESS','COMPLETED','CANCELLED','CLOSED'))
 );
 
-CREATE TABLE IF NOT EXISTS vessel.maintenance (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    code_partner varchar(20) REFERENCES partner.info(code_partner) ON DELETE SET NULL,
-    description text NOT NULL,
-    start_date date NOT NULL,
-    end_date date,
-    status varchar(20) DEFAULT 'SCHEDULED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+CREATE TABLE IF NOT EXISTS commercial.purchase_order_line (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    po_number           varchar(50) NOT NULL REFERENCES commercial.purchase_order(po_number),
+    line_number         smallint NOT NULL,
+    commodity           varchar(100),
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    volume              numeric(20,6) NOT NULL,
+    unit_price          numeric(18,4),
+    total_price         numeric(20,4),
+    description         text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_po_line UNIQUE (po_number, line_number)
 );
 
--- -----------------------------------------------------------------------------
--- SCHEMA: BUYER
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS buyer.type (
-    code_type varchar(20) PRIMARY KEY,
-    description text,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now()
+-- ---------------------------------------------------------------------------
+-- 6.2 Shipment Projection
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS commercial.shipment_projection (
+    projection_id       varchar(30) PRIMARY KEY,
+    po_number           varchar(50) NOT NULL REFERENCES commercial.purchase_order(po_number),
+    vessel_id           varchar(20) REFERENCES fleet.vessel(vessel_id),
+    projected_volume    numeric(20,6) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    projected_loading_date date,
+    projected_arrival_date  date,
+    status              varchar(30) NOT NULL DEFAULT 'PLANNED',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_proj_status CHECK (status IN ('PLANNED','CONFIRMED','CANCELLED','COMPLETED'))
 );
 
-CREATE TABLE IF NOT EXISTS buyer.info (
-    code_buyer varchar(20) PRIMARY KEY,
-    code_type varchar(20) REFERENCES buyer.type(code_type),
-    name varchar(100) NOT NULL,
-    address text,
-    city varchar(50),
-    country char(2) REFERENCES ref.country(country_code),
-    deposit_balance numeric(15,2) DEFAULT 0.00,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+-- =============================================================================
+-- 7. LOGISTICS & SHIPMENT
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS logistics.shipment (
+    shipment_id         varchar(30) PRIMARY KEY,
+    po_number           varchar(50) REFERENCES commercial.purchase_order(po_number),
+    projection_id       varchar(30) REFERENCES commercial.shipment_projection(projection_id),
+    vessel_id           varchar(20) NOT NULL REFERENCES fleet.vessel(vessel_id),
+    shipment_type       varchar(20) NOT NULL DEFAULT 'MARITIME',
+    cargo_description   text,
+    status              varchar(30) NOT NULL DEFAULT 'PLANNED',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_shipment_status CHECK (status IN ('PLANNED','CONFIRMED','LOADING','SAILING','ARRIVED','DISCHARGING','COMPLETED','CANCELLED'))
 );
 
-CREATE TABLE IF NOT EXISTS buyer.discharge_location (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_buyer varchar(20) REFERENCES buyer.info(code_buyer) ON DELETE CASCADE,
-    name varchar(100) NOT NULL,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+CREATE TABLE IF NOT EXISTS logistics.shipment_party (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    shipment_id         varchar(30) NOT NULL REFERENCES logistics.shipment(shipment_id),
+    partner_id          varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    party_role          varchar(30) NOT NULL,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_shipment_party_role CHECK (party_role IN ('SHIPPER','CONSIGNEE','NOTIFY_PARTY','BROKER','FORWARDER','AGENT'))
 );
 
-CREATE TABLE IF NOT EXISTS buyer.deposit_ledger (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_buyer varchar(20) REFERENCES buyer.info(code_buyer) ON DELETE CASCADE,
-    transaction_date timestamptz NOT NULL DEFAULT now(),
-    transaction_type varchar(30) NOT NULL,
-    amount numeric(15,2) NOT NULL,
-    reference_doc varchar(50),
-    description text,
-    created_by varchar(20) REFERENCES usr.info(code_user),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
+-- =============================================================================
+-- 8. VOYAGE ARCHITECTURE
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS voyage.voyage (
+    voyage_id           varchar(30) PRIMARY KEY,
+    shipment_id         varchar(30) REFERENCES logistics.shipment(shipment_id),
+    vessel_id           varchar(20) NOT NULL REFERENCES fleet.vessel(vessel_id),
+    voyage_number       varchar(30) NOT NULL,
+    voyage_type         varchar(20) NOT NULL DEFAULT 'INTERNATIONAL',
+    status              varchar(30) NOT NULL DEFAULT 'PLANNED',
+    planned_departure   timestamptz,
+    planned_arrival     timestamptz,
+    actual_departure    timestamptz,
+    actual_arrival      timestamptz,
+    departure_timezone  varchar(50) REFERENCES ref.timezone(timezone_id),
+    arrival_timezone    varchar(50) REFERENCES ref.timezone(timezone_id),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_voyage_status CHECK (status IN ('PLANNED','CONFIRMED','IN_PROGRESS','COMPLETED','CANCELLED')),
+    CONSTRAINT uq_vessel_voyage UNIQUE (vessel_id, voyage_number)
 );
 
--- -----------------------------------------------------------------------------
--- SCHEMA: OPERATIONAL
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS operational.purchase_order (
-    po_number varchar(50) PRIMARY KEY,
-    code_buyer varchar(20) REFERENCES buyer.info(code_buyer),
-    po_date date NOT NULL,
-    target_completion_date date,
-    uom varchar(10) REFERENCES param.uom(code_uom),
-    total_volume numeric(20,6) NOT NULL,
-    unit_price numeric(15,2) NOT NULL,
-    total_amount numeric(15,2) NOT NULL,
-    created_by varchar(20) REFERENCES usr.info(code_user),
-    approved_by varchar(20) REFERENCES usr.info(code_user),
-    status varchar(20) DEFAULT 'DRAFT',
-    description text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_po_status CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','IN PROGRESS','COMPLETED','CANCELLED'))
+COMMENT ON TABLE voyage.voyage IS 'Voyage — core entity linking shipment to vessel movements';
+
+CREATE TABLE IF NOT EXISTS voyage.voyage_leg (
+    leg_id              varchar(30) PRIMARY KEY,
+    voyage_id           varchar(30) NOT NULL REFERENCES voyage.voyage(voyage_id),
+    leg_sequence        smallint NOT NULL,
+    origin_port_id      varchar(10) NOT NULL REFERENCES port.port(port_id),
+    destination_port_id varchar(10) NOT NULL REFERENCES port.port(port_id),
+    distance_nm         numeric(10,2),
+    status              varchar(30) NOT NULL DEFAULT 'PLANNED',
+    planned_start       timestamptz,
+    planned_end         timestamptz,
+    actual_start        timestamptz,
+    actual_end          timestamptz,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_leg_status CHECK (status IN ('PLANNED','CONFIRMED','IN_PROGRESS','COMPLETED','CANCELLED')),
+    CONSTRAINT uq_leg_sequence UNIQUE (voyage_id, leg_sequence)
 );
 
-CREATE TABLE IF NOT EXISTS operational.approval_log (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    ref_table varchar(50) NOT NULL,
-    ref_id varchar(50) NOT NULL,
-    action varchar(20) NOT NULL,
-    -- Ditambahkan (Section 35): jejak transisi status eksplisit, terpisah
-    -- dari 'action' (mis. action='APPROVE', previous_status='SUBMITTED',
-    -- new_status='APPROVED'), supaya riwayat approval bisa direkonstruksi
-    -- tanpa perlu menebak dari tabel bisnis aslinya.
-    previous_status varchar(30),
-    new_status varchar(30),
-    approved_by varchar(20) REFERENCES usr.info(code_user),
-    approved_at timestamptz NOT NULL DEFAULT now(),
-    remarks text,
-    created_at timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS voyage.port_call (
+    port_call_id        varchar(30) PRIMARY KEY,
+    voyage_id           varchar(30) NOT NULL REFERENCES voyage.voyage(voyage_id),
+    leg_id              varchar(30) REFERENCES voyage.voyage_leg(leg_id),
+    port_id             varchar(10) NOT NULL REFERENCES port.port(port_id),
+    terminal_id         varchar(20) REFERENCES port.terminal(terminal_id),
+    call_sequence       smallint NOT NULL,
+    call_purpose        varchar(30) NOT NULL DEFAULT 'LOADING',
+    status              varchar(30) NOT NULL DEFAULT 'PLANNED',
+    planned_arrival     timestamptz,
+    planned_departure   timestamptz,
+    actual_arrival      timestamptz,
+    actual_departure    timestamptz,
+    timezone_id         varchar(50) REFERENCES ref.timezone(timezone_id),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_port_call_purpose CHECK (call_purpose IN ('LOADING','DISCHARGE','ANCHORAGE','BUNKERING','REPAIR','CUSTOMS','BOTH')),
+    CONSTRAINT chk_port_call_status CHECK (status IN ('PLANNED','CONFIRMED','ARRIVED','BERTHED','LOADING','DISCHARGING','DEPARTED','COMPLETED','CANCELLED')),
+    CONSTRAINT uq_port_call_seq UNIQUE (voyage_id, call_sequence)
 );
 
-CREATE TABLE IF NOT EXISTS operational.stock_ledger (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_site varchar(20) NOT NULL REFERENCES site.info(code_site),
-    transaction_time timestamptz NOT NULL DEFAULT now(),
-    transaction_type varchar(30) NOT NULL,
-    reference_type varchar(50),
-    reference_id varchar(100),
-    quantity numeric(20,6) NOT NULL,
-    unit_code varchar(20) NOT NULL DEFAULT 'M3' REFERENCES param.uom(code_uom),
-    direction smallint NOT NULL,
-    quantity_delta numeric(20,6) GENERATED ALWAYS AS (quantity * direction) STORED,
-    remarks text,
-    created_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_stock_direction CHECK (direction IN (-1, 1)),
-    CONSTRAINT chk_stock_quantity CHECK (quantity > 0),
-    CONSTRAINT chk_stock_txn_type CHECK (transaction_type IN (
-        'INITIAL_BALANCE','PRODUCTION','SHIPMENT','TRANSFER_IN','TRANSFER_OUT','ADJUSTMENT','CORRECTION'
+CREATE TABLE IF NOT EXISTS voyage.port_call_event (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    port_call_id        varchar(30) NOT NULL REFERENCES voyage.port_call(port_call_id),
+    event_type          varchar(30) NOT NULL,
+    planned_at          timestamptz,
+    estimated_at        timestamptz,
+    actual_at           timestamptz NOT NULL,
+    timezone_id         varchar(50) REFERENCES ref.timezone(timezone_id),
+    location            geometry(Point, 4326),
+    source              varchar(50) DEFAULT 'MANUAL',
+    remarks             text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_event_type CHECK (event_type IN (
+        'ARRIVAL','ANCHORAGE','BERTHING','MOORING','LOADING_START','LOADING_END',
+        'DISCHARGE_START','DISCHARGE_END','UNMOORING','DEPARTURE','PILOT_ONBOARD',
+        'PILOT_OFF','TUG_ASSIST','CUSTOMS_CLEARANCE','SURVEY'
     ))
 );
 
-CREATE TABLE IF NOT EXISTS operational.daily_production (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel),
-    production_date date NOT NULL,
-    volume_mined numeric(20,6) NOT NULL,
-    operating_hours numeric(6,2) NOT NULL,
-    reported_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT uq_daily_production UNIQUE (code_site, code_vessel, production_date)
+-- =============================================================================
+-- 9. REGULATORY & CLEARANCE (Generic multi-country)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS regulatory.clearance (
+    clearance_id        varchar(30) PRIMARY KEY,
+    country_id          smallint NOT NULL REFERENCES ref.country(country_id),
+    clearance_type      varchar(30) NOT NULL,
+    direction           varchar(10) NOT NULL,
+    shipment_id         varchar(30) REFERENCES logistics.shipment(shipment_id),
+    voyage_id           varchar(30) REFERENCES voyage.voyage(voyage_id),
+    vessel_id           varchar(20) REFERENCES fleet.vessel(vessel_id),
+    port_call_id        varchar(30) REFERENCES voyage.port_call(port_call_id),
+    status              varchar(30) NOT NULL DEFAULT 'DRAFT',
+    submitted_at        timestamptz,
+    approved_at         timestamptz,
+    approved_by_partner varchar(20) REFERENCES core.partner(partner_id),
+    valid_until         timestamptz,
+    reference_number    varchar(100),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_clearance_direction CHECK (direction IN ('IN','OUT','TRANSIT')),
+    CONSTRAINT chk_clearance_type CHECK (clearance_type IN (
+        'CUSTOMS','IMMIGRATION','PORT_HEALTH','HARBOR_MASTER','MPA','ICA',
+        'SECURITY','ENVIRONMENTAL','PORT_ENTRY','PORT_EXIT'
+    )),
+    CONSTRAINT chk_clearance_status CHECK (status IN (
+        'DRAFT','SUBMITTED','UNDER_REVIEW','APPROVED','REJECTED','RESUBMITTED','CANCELLED','EXPIRED'
+    ))
 );
 
-CREATE TABLE IF NOT EXISTS operational.delivery_order (
-    do_number varchar(50) PRIMARY KEY,
-    po_number varchar(50) REFERENCES operational.purchase_order(po_number),
-    code_vessel_main varchar(20) REFERENCES vessel.info(code_vessel),
-    code_vessel_assist varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
-    loading_site varchar(20) REFERENCES site.info(code_site),
-    discharge_location_id bigint REFERENCES buyer.discharge_location(id),
-    target_volume numeric(20,6) NOT NULL,
-    status varchar(20) DEFAULT 'ISSUED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_do_status CHECK (status IN ('ISSUED','LOADING','SAILING','DELIVERED','CANCELLED'))
+COMMENT ON TABLE regulatory.clearance IS 'Generic multi-country clearance — never make separate tables per country. Supports IDN/IN, IDN/OUT, SGP/IN, SGP/OUT, etc.';
+
+CREATE TABLE IF NOT EXISTS regulatory.clearance_event (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    clearance_id        varchar(30) NOT NULL REFERENCES regulatory.clearance(clearance_id),
+    event_type          varchar(30) NOT NULL,
+    event_status        varchar(30) NOT NULL,
+    event_at            timestamptz NOT NULL DEFAULT now(),
+    actor_partner_id    varchar(20) REFERENCES core.partner(partner_id),
+    remarks             text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_clearance_event_type CHECK (event_type IN (
+        'SUBMISSION','REVIEW','APPROVAL','REJECTION','RESUBMISSION','CANCELLATION','EXPIRY'
+    ))
 );
 
-CREATE TABLE IF NOT EXISTS operational.cargo_survey (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
-    code_partner varchar(20) REFERENCES partner.info(code_partner),
-    survey_type varchar(30) NOT NULL,
-    survey_date timestamptz NOT NULL,
-    gross_volume numeric(20,6) NOT NULL,
-    moisture_pct numeric(7,4),
-    net_volume numeric(20,6) NOT NULL,
-    report_doc_number varchar(100),
-    status varchar(20),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_survey_status CHECK (status IN ('PENDING','VERIFIED','REJECTED'))
+CREATE TABLE IF NOT EXISTS regulatory.clearance_document (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    clearance_id        varchar(30) NOT NULL REFERENCES regulatory.clearance(clearance_id),
+    document_type       varchar(50) NOT NULL,
+    document_number     varchar(100),
+    document_url        text,
+    issued_date         date,
+    expiry_date         date,
+    status              varchar(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_clr_doc_status CHECK (status IN ('ACTIVE','EXPIRED','REVOKED'))
 );
 
-CREATE TABLE IF NOT EXISTS operational.bill_of_lading (
-    bl_number varchar(50) PRIMARY KEY,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
-    issue_date date NOT NULL,
-    port_of_loading varchar(100) NOT NULL,
-    port_of_discharge varchar(100) NOT NULL,
-    shipped_volume numeric(20,6) NOT NULL,
-    status varchar(20) DEFAULT 'ISSUED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_bl_status CHECK (status IN ('ISSUED','RELEASED','SURRENDERED'))
+-- =============================================================================
+-- 10. OPERATIONS — MINING
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS operations.project (
+    project_code        varchar(20) PRIMARY KEY,
+    name                varchar(200) NOT NULL,
+    org_code            varchar(20) REFERENCES core.organization(org_code),
+    country_id          smallint REFERENCES ref.country(country_id),
+    start_date          date,
+    end_date            date,
+    status              varchar(30) NOT NULL DEFAULT 'ACTIVE',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_project_status CHECK (status IN ('PLANNED','ACTIVE','SUSPENDED','COMPLETED','CANCELLED'))
 );
 
-CREATE TABLE IF NOT EXISTS operational.statement_of_fact (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
-    event_time timestamptz NOT NULL,
-    event_type varchar(50) NOT NULL,
-    remarks text,
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS operations.work_area (
+    work_area_code      varchar(20) PRIMARY KEY,
+    project_code        varchar(20) REFERENCES operations.project(project_code),
+    site_code           varchar(20) REFERENCES operations.site(site_code),
+    name                varchar(200) NOT NULL,
+    area_type           varchar(30) NOT NULL DEFAULT 'MINING',
+    geom                geometry(Polygon, 4326),
+    centroid            geometry(Point, 4326),
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_work_area_type CHECK (area_type IN ('MINING','STOCKPILE','LOADING_POINT','DISPOSAL','BUFFER'))
 );
 
--- -----------------------------------------------------------------------------
--- VESSEL MOVEMENT_LOG
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS vessel.movement_log (
-    id bigint GENERATED ALWAYS AS IDENTITY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE CASCADE,
-    code_site varchar(20) REFERENCES site.info(code_site) ON DELETE SET NULL,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
-    status varchar(30) NOT NULL,
-    latitude numeric(10,7),
-    longitude numeric(10,7),
-    geom geometry(Point, 4326) GENERATED ALWAYS AS (
+CREATE TABLE IF NOT EXISTS operations.work_activity (
+    activity_id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    work_area_code      varchar(20) REFERENCES operations.work_area(work_area_code),
+    vessel_id           varchar(20) REFERENCES fleet.vessel(vessel_id),
+    activity_type       varchar(30) NOT NULL,
+    planned_start       timestamptz,
+    planned_end         timestamptz,
+    actual_start        timestamptz,
+    actual_end          timestamptz,
+    status              varchar(30) NOT NULL DEFAULT 'SCHEDULED',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_activity_type CHECK (activity_type IN ('MINING','LOADING','STOCKPILING','MAINTENANCE','SURVEY','BLASTING','TRANSFER')),
+    CONSTRAINT chk_activity_status CHECK (status IN ('SCHEDULED','IN_PROGRESS','PAUSED','COMPLETED','CANCELLED'))
+);
+
+CREATE TABLE IF NOT EXISTS operations.work_activity_event (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    activity_id         bigint NOT NULL REFERENCES operations.work_activity(activity_id),
+    event_type          varchar(30) NOT NULL,
+    event_at            timestamptz NOT NULL DEFAULT now(),
+    remarks             text,
+    created_by          varchar(20),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_activity_event CHECK (event_type IN ('START','PAUSE','RESUME','COMPLETE','CANCEL'))
+);
+
+-- =============================================================================
+-- 11. CARGO & QUANTITY CONTROL
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS cargo.cargo (
+    cargo_id            varchar(30) PRIMARY KEY,
+    shipment_id         varchar(30) REFERENCES logistics.shipment(shipment_id),
+    cargo_type          varchar(100) NOT NULL,
+    commodity           varchar(100),
+    uom_code            varchar(10) NOT NULL REFERENCES ref.unit_of_measure(uom_code),
+    total_quantity      numeric(20,6),
+    description         text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS cargo.cargo_lot (
+    lot_id              varchar(30) PRIMARY KEY,
+    cargo_id            varchar(30) NOT NULL REFERENCES cargo.cargo(cargo_id),
+    lot_number          varchar(50) NOT NULL,
+    source_work_area    varchar(20) REFERENCES operations.work_area(work_area_code),
+    quantity            numeric(20,6) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    grade               varchar(50),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_cargo_lot UNIQUE (cargo_id, lot_number)
+);
+
+CREATE TABLE IF NOT EXISTS cargo.voyage_cargo (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    voyage_id           varchar(30) NOT NULL REFERENCES voyage.voyage(voyage_id),
+    cargo_id            varchar(30) NOT NULL REFERENCES cargo.cargo(cargo_id),
+    loaded_quantity     numeric(20,6),
+    discharged_quantity numeric(20,6),
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_voyage_cargo UNIQUE (voyage_id, cargo_id)
+);
+
+CREATE TABLE IF NOT EXISTS cargo.cargo_movement (
+    movement_id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    cargo_id            varchar(30) NOT NULL REFERENCES cargo.cargo(cargo_id),
+    lot_id              varchar(30) REFERENCES cargo.cargo_lot(lot_id),
+    movement_type       varchar(30) NOT NULL,
+    quantity            numeric(20,6) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    from_location       varchar(100),
+    to_location         varchar(100),
+    from_port_call_id   varchar(30) REFERENCES voyage.port_call(port_call_id),
+    to_port_call_id     varchar(30) REFERENCES voyage.port_call(port_call_id),
+    movement_time       timestamptz NOT NULL DEFAULT now(),
+    source              varchar(50) DEFAULT 'MANUAL',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_movement_type CHECK (movement_type IN (
+        'LOADING','TRANSFER','TRANSIT','DISCHARGE','RETURN','ADJUSTMENT','SHIFTING'
+    ))
+);
+
+COMMENT ON TABLE cargo.cargo_movement IS 'End-to-end cargo movement tracking — initial volume → loading → transit → discharge → final volume';
+
+CREATE TABLE IF NOT EXISTS cargo.quantity_measurement (
+    measurement_id      bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    cargo_id            varchar(30) REFERENCES cargo.cargo(cargo_id),
+    movement_id         bigint REFERENCES cargo.cargo_movement(movement_id),
+    port_call_id        varchar(30) REFERENCES voyage.port_call(port_call_id),
+    measurement_type    varchar(30) NOT NULL,
+    measurement_method  varchar(50),
+    quantity            numeric(20,6) NOT NULL,
+    uom_code            varchar(10) NOT NULL REFERENCES ref.unit_of_measure(uom_code),
+    moisture_pct        numeric(7,4),
+    net_quantity        numeric(20,6),
+    measurement_location geometry(Point, 4326),
+    measured_at         timestamptz NOT NULL DEFAULT now(),
+    measured_by_partner varchar(20) REFERENCES core.partner(partner_id),
+    source              varchar(50) DEFAULT 'MANUAL',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_meas_type CHECK (measurement_type IN (
+        'INITIAL_VOLUME','LOADING_SURVEY','ONBOARD_SURVEY','DISCHARGE_SURVEY',
+        'FINAL_VOLUME','DRAFT_SURVEY','WEIGHING','FLOW_METER'
+    ))
+);
+
+COMMENT ON TABLE cargo.quantity_measurement IS 'Every quantity measurement — enables reconciliation from initial to final volume';
+
+-- =============================================================================
+-- 12. SURVEY & SAMPLING
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS survey.survey (
+    survey_id           varchar(30) PRIMARY KEY,
+    voyage_id           varchar(30) REFERENCES voyage.voyage(voyage_id),
+    port_call_id        varchar(30) REFERENCES voyage.port_call(port_call_id),
+    cargo_id            varchar(30) REFERENCES cargo.cargo(cargo_id),
+    survey_type         varchar(30) NOT NULL,
+    survey_date         timestamptz NOT NULL,
+    surveyor_partner_id varchar(20) REFERENCES core.partner(partner_id),
+    status              varchar(30) NOT NULL DEFAULT 'PENDING',
+    report_number       varchar(100),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_survey_type CHECK (survey_type IN (
+        'INITIAL','DRAFT','FINAL','VERIFICATION','LOADING','DISCHARGE','INTERMEDIATE'
+    )),
+    CONSTRAINT chk_survey_status CHECK (status IN ('PENDING','IN_PROGRESS','COMPLETED','VERIFIED','REJECTED'))
+);
+
+CREATE TABLE IF NOT EXISTS survey.survey_measurement (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    survey_id           varchar(30) NOT NULL REFERENCES survey.survey(survey_id),
+    measurement_type    varchar(50) NOT NULL,
+    value               numeric(20,6) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS survey.sample (
+    sample_id           varchar(30) PRIMARY KEY,
+    survey_id           varchar(30) REFERENCES survey.survey(survey_id),
+    cargo_id            varchar(30) REFERENCES cargo.cargo(cargo_id),
+    lot_id              varchar(30) REFERENCES cargo.cargo_lot(lot_id),
+    sample_number       varchar(50) NOT NULL,
+    sample_type         varchar(30) NOT NULL,
+    collection_point    geometry(Point, 4326),
+    collected_at        timestamptz NOT NULL,
+    collected_by_partner varchar(20) REFERENCES core.partner(partner_id),
+    status              varchar(30) NOT NULL DEFAULT 'COLLECTED',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_sample_status CHECK (status IN ('COLLECTED','SUBMITTED','IN_TESTING','COMPLETED','REJECTED')),
+    CONSTRAINT chk_sample_type CHECK (sample_type IN ('CARGO','WATER','SOIL','AIR','SEDIMENT'))
+);
+
+CREATE TABLE IF NOT EXISTS survey.sample_test (
+    test_id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sample_id           varchar(30) NOT NULL REFERENCES survey.sample(sample_id),
+    laboratory_partner_id varchar(20) REFERENCES core.partner(partner_id),
+    test_type           varchar(50) NOT NULL,
+    test_method         varchar(100),
+    test_started_at     timestamptz,
+    test_completed_at   timestamptz,
+    status              varchar(30) NOT NULL DEFAULT 'PENDING',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_test_status CHECK (status IN ('PENDING','IN_PROGRESS','COMPLETED','CANCELLED'))
+);
+
+CREATE TABLE IF NOT EXISTS survey.sample_result (
+    result_id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    test_id             bigint NOT NULL REFERENCES survey.sample_test(test_id),
+    parameter           varchar(100) NOT NULL,
+    value               numeric(20,6) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    min_threshold       numeric(20,6),
+    max_threshold       numeric(20,6),
+    is_pass             boolean,
+    result_at           timestamptz NOT NULL DEFAULT now(),
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- =============================================================================
+-- 13. TRACKING — AIS & VESSEL TRACK
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS tracking.ais_position (
+    id                  bigint GENERATED ALWAYS AS IDENTITY,
+    vessel_id           varchar(20) NOT NULL REFERENCES fleet.vessel(vessel_id),
+    voyage_id           varchar(30) REFERENCES voyage.voyage(voyage_id),
+    record_time         timestamptz NOT NULL,
+    latitude            numeric(10,7) NOT NULL,
+    longitude           numeric(10,7) NOT NULL,
+    geom                geometry(Point, 4326) GENERATED ALWAYS AS (
         ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
     ) STORED,
-    log_time timestamptz NOT NULL DEFAULT now(),
-    description text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (id, log_time)
-) PARTITION BY RANGE (log_time);
+    speed_over_ground   numeric(6,2),
+    course_over_ground  numeric(5,2),
+    heading             numeric(5,2),
+    navigation_status   varchar(50),
+    source_mmsi         varchar(9),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (id, record_time)
+) PARTITION BY RANGE (record_time);
 
--- Partisi default sebagai jaring pengaman jika ada log_time di luar
--- rentang yang sudah dibuat oleh cron bulanan.
-CREATE TABLE IF NOT EXISTS vessel.movement_log_default
-    PARTITION OF vessel.movement_log DEFAULT;
+COMMENT ON TABLE tracking.ais_position IS 'AIS position data — partitioned by time for performance';
 
--- -----------------------------------------------------------------------------
--- SCHEMA: FINANCE
--- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tracking.ais_position_default
+    PARTITION OF tracking.ais_position DEFAULT;
+
+CREATE TABLE IF NOT EXISTS tracking.vessel_track (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vessel_id           varchar(20) NOT NULL REFERENCES fleet.vessel(vessel_id),
+    voyage_id           varchar(30) REFERENCES voyage.voyage(voyage_id),
+    voyage_leg_id       varchar(30) REFERENCES voyage.voyage_leg(leg_id),
+    track_segment       geometry(Linestring, 4326),
+    start_time          timestamptz NOT NULL,
+    end_time            timestamptz,
+    distance_nm         numeric(10,2),
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- =============================================================================
+-- 14. ENVIRONMENTAL MONITORING
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS environment.station (
+    station_id          varchar(20) PRIMARY KEY,
+    site_code           varchar(20) REFERENCES operations.site(site_code),
+    work_area_code      varchar(20) REFERENCES operations.work_area(work_area_code),
+    station_type        varchar(30) NOT NULL,
+    latitude            numeric(10,7) NOT NULL,
+    longitude           numeric(10,7) NOT NULL,
+    geom                geometry(Point, 4326) GENERATED ALWAYS AS (
+        ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
+    ) STORED,
+    depth_m             numeric(8,2),
+    battery_level       numeric(5,2),
+    last_maintenance    date,
+    status              varchar(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_env_station_status CHECK (status IN ('ACTIVE','INACTIVE','MAINTENANCE','DECOMMISSIONED')),
+    CONSTRAINT chk_battery CHECK (battery_level IS NULL OR (battery_level >= 0 AND battery_level <= 100))
+);
+
+CREATE TABLE IF NOT EXISTS environment.observation (
+    observation_id      bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    station_id          varchar(20) NOT NULL REFERENCES environment.station(station_id),
+    voyage_id           varchar(30) REFERENCES voyage.voyage(voyage_id),
+    port_call_id        varchar(30) REFERENCES voyage.port_call(port_call_id),
+    observed_at         timestamptz NOT NULL,
+    weather_condition   varchar(50),
+    wind_speed_kt       numeric(6,2),
+    wave_height_m       numeric(6,2),
+    current_speed_kt    numeric(6,2),
+    remarks             text,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS environment.measurement (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    observation_id      bigint NOT NULL REFERENCES environment.observation(observation_id),
+    parameter           varchar(50) NOT NULL,
+    value               numeric(12,4) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS environment.alert (
+    alert_id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    station_id          varchar(20) REFERENCES environment.station(station_id),
+    observation_id      bigint REFERENCES environment.observation(observation_id),
+    alert_type          varchar(50) NOT NULL,
+    severity            varchar(20) NOT NULL DEFAULT 'WARNING',
+    parameter           varchar(50),
+    threshold_value     numeric(12,4),
+    actual_value        numeric(12,4),
+    triggered_at        timestamptz NOT NULL DEFAULT now(),
+    acknowledged_at     timestamptz,
+    acknowledged_by     varchar(20),
+    status              varchar(20) NOT NULL DEFAULT 'ACTIVE',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_env_alert_severity CHECK (severity IN ('INFO','WARNING','CRITICAL','EMERGENCY')),
+    CONSTRAINT chk_env_alert_status CHECK (status IN ('ACTIVE','ACKNOWLEDGED','RESOLVED','DISMISSED'))
+);
+
+-- =============================================================================
+-- 15. FINANCE
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS finance.exchange_rate (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    currency_from varchar(3) NOT NULL REFERENCES ref.currency(currency_code),
-    currency_to varchar(3) REFERENCES ref.currency(currency_code),
-    rate_date date NOT NULL,
-    rate_type varchar(30) NOT NULL,
-    exchange_rate numeric(15,4) NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    currency_from       char(3) NOT NULL REFERENCES ref.currency(currency_code),
+    currency_to         char(3) NOT NULL REFERENCES ref.currency(currency_code),
+    rate_date           date NOT NULL,
+    rate_type           varchar(20) NOT NULL DEFAULT 'SPOT',
+    rate_buy            numeric(18,6),
+    rate_sell           numeric(18,6),
+    rate_mid            numeric(18,6) NOT NULL,
+    source              varchar(50),
+    created_at          timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT uq_exchange_rate UNIQUE (currency_from, currency_to, rate_date, rate_type)
 );
 
+CREATE TABLE IF NOT EXISTS finance.proforma_invoice (
+    proforma_number     varchar(50) PRIMARY KEY,
+    shipment_id         varchar(30) REFERENCES logistics.shipment(shipment_id),
+    buyer_partner_id    varchar(20) NOT NULL REFERENCES core.partner(partner_id),
+    issue_date          date NOT NULL,
+    estimated_volume    numeric(20,6),
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    unit_price          numeric(18,4),
+    currency_code       char(3) REFERENCES ref.currency(currency_code),
+    estimated_amount    numeric(20,4),
+    status              varchar(30) NOT NULL DEFAULT 'DRAFT',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_proforma_status CHECK (status IN ('DRAFT','ISSUED','ACCEPTED','INVOICED','CANCELLED'))
+);
+
 CREATE TABLE IF NOT EXISTS finance.invoice (
-    invoice_number varchar(50) PRIMARY KEY,
-    invoice_type varchar(20) NOT NULL,
-    invoice_category varchar(20) DEFAULT 'FINAL',
-    parent_invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE SET NULL,
-    code_buyer varchar(20) REFERENCES buyer.info(code_buyer),
-    code_partner varchar(20) REFERENCES partner.info(code_partner),
-    po_number varchar(50) REFERENCES operational.purchase_order(po_number) ON DELETE SET NULL,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
-    issue_date date NOT NULL,
-    due_date date NOT NULL,
-    currency_code varchar(3) REFERENCES ref.currency(currency_code),
-    exchange_rate_id bigint REFERENCES finance.exchange_rate(id) ON DELETE SET NULL,
-    subtotal numeric(15,2) DEFAULT 0.00,
-    total_amount numeric(15,2) DEFAULT 0.00,
-    subtotal_idr numeric(15,2) DEFAULT 0.00,
-    total_amount_idr numeric(15,2) DEFAULT 0.00,
-    status varchar(20) DEFAULT 'DRAFT',
-    description text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_invoice_entity CHECK (
-        (invoice_type = 'SALES' AND code_buyer IS NOT NULL AND code_partner IS NULL) OR
-        (invoice_type = 'PURCHASE' AND code_partner IS NOT NULL AND code_buyer IS NULL)
-    ),
-    CONSTRAINT chk_invoice_status CHECK (status IN ('DRAFT','ISSUED','PAID','PARTIAL','CANCELLED')),
-    CONSTRAINT chk_invoice_category CHECK (invoice_category IN ('FINAL','PROFORMA'))
+    invoice_number      varchar(50) PRIMARY KEY,
+    invoice_type        varchar(20) NOT NULL,
+    invoice_category    varchar(20) NOT NULL DEFAULT 'FINAL',
+    parent_invoice      varchar(50) REFERENCES finance.invoice(invoice_number),
+    buyer_partner_id    varchar(20) REFERENCES core.partner(partner_id),
+    seller_partner_id   varchar(20) REFERENCES core.partner(partner_id),
+    proforma_number     varchar(50) REFERENCES finance.proforma_invoice(proforma_number),
+    shipment_id         varchar(30) REFERENCES logistics.shipment(shipment_id),
+    po_number           varchar(50) REFERENCES commercial.purchase_order(po_number),
+    issue_date          date NOT NULL,
+    due_date            date NOT NULL,
+    currency_code       char(3) NOT NULL REFERENCES ref.currency(currency_code),
+    exchange_rate_id    bigint REFERENCES finance.exchange_rate(id),
+    subtotal            numeric(20,4) NOT NULL DEFAULT 0,
+    tax_total           numeric(20,4) NOT NULL DEFAULT 0,
+    discount_total      numeric(20,4) NOT NULL DEFAULT 0,
+    total_amount        numeric(20,4) NOT NULL DEFAULT 0,
+    total_amount_idr    numeric(20,4),
+    status              varchar(30) NOT NULL DEFAULT 'DRAFT',
+    description         text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_invoice_type CHECK (invoice_type IN ('SALES','PURCHASE','CREDIT_NOTE','DEBIT_NOTE')),
+    CONSTRAINT chk_invoice_category CHECK (invoice_category IN ('PROFORMA','FINAL','PROVISIONAL')),
+    CONSTRAINT chk_invoice_status CHECK (status IN ('DRAFT','ISSUED','CONFIRMED','PARTIAL','PAID','OVERDUE','CANCELLED','CREDITED'))
 );
 
-CREATE TABLE IF NOT EXISTS finance.invoice_delivery_order (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE CASCADE,
-    allocated_volume numeric(20,6),
-    description text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT uq_invoice_do UNIQUE (invoice_number, do_number)
-);
-
-CREATE TABLE IF NOT EXISTS finance.invoice_item (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
-    description varchar(255) NOT NULL,
-    quantity numeric(20,6) NOT NULL,
-    uom varchar(20) NOT NULL,
-    unit_price numeric(15,2) NOT NULL,
-    total_price numeric(15,2) NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+CREATE TABLE IF NOT EXISTS finance.invoice_line (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    invoice_number      varchar(50) NOT NULL REFERENCES finance.invoice(invoice_number),
+    line_number         smallint NOT NULL,
+    description         varchar(255) NOT NULL,
+    quantity            numeric(20,6) NOT NULL,
+    uom_code            varchar(10) REFERENCES ref.unit_of_measure(uom_code),
+    unit_price          numeric(18,4) NOT NULL,
+    total_price         numeric(20,4) NOT NULL,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_invoice_line UNIQUE (invoice_number, line_number)
 );
 
 CREATE TABLE IF NOT EXISTS finance.invoice_tax (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    invoice_number varchar(50) REFERENCES finance.invoice(invoice_number) ON DELETE CASCADE,
-    tax_type varchar(30) NOT NULL,
-    tax_rate_pct numeric(5,2) NOT NULL,
-    tax_amount numeric(15,2) NOT NULL,
-    tax_amount_idr numeric(15,2) NOT NULL,
-    tax_doc_number varchar(50),
-    created_at timestamptz NOT NULL DEFAULT now()
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    invoice_number      varchar(50) NOT NULL REFERENCES finance.invoice(invoice_number),
+    tax_type            varchar(30) NOT NULL,
+    tax_rate_pct        numeric(5,2) NOT NULL,
+    tax_base_amount     numeric(20,4) NOT NULL,
+    tax_amount          numeric(20,4) NOT NULL,
+    tax_amount_idr      numeric(20,4),
+    tax_doc_number      varchar(50),
+    created_at          timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS finance.payment (
-    payment_number varchar(50) PRIMARY KEY,
-    invoice_number varchar(50) REFERENCES finance.invoice(invoice_number),
-    payment_date timestamptz NOT NULL DEFAULT now(),
-    payment_method varchar(30) NOT NULL,
-    currency_code varchar(3) REFERENCES ref.currency(currency_code),
-    exchange_rate_id bigint REFERENCES finance.exchange_rate(id) ON DELETE SET NULL,
-    amount numeric(15,2) NOT NULL,
-    amount_idr numeric(15,2) NOT NULL,
-    reference_code varchar(100),
-    status varchar(20) DEFAULT 'PENDING',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_payment_status CHECK (status IN ('PENDING','COMPLETED','FAILED'))
+    payment_number      varchar(50) PRIMARY KEY,
+    invoice_number      varchar(50) NOT NULL REFERENCES finance.invoice(invoice_number),
+    buyer_partner_id    varchar(20) REFERENCES core.partner(partner_id),
+    payment_date        date NOT NULL,
+    payment_method      varchar(30) NOT NULL,
+    currency_code       char(3) NOT NULL REFERENCES ref.currency(currency_code),
+    exchange_rate_id    bigint REFERENCES finance.exchange_rate(id),
+    amount              numeric(20,4) NOT NULL,
+    amount_idr          numeric(20,4),
+    reference_code      varchar(100),
+    notes               text,
+    status              varchar(30) NOT NULL DEFAULT 'PENDING',
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    CONSTRAINT chk_payment_method CHECK (payment_method IN ('BANK_TRANSFER','LC','TELEGRAPHIC','CHECK','CASH','CARD')),
+    CONSTRAINT chk_payment_status CHECK (status IN ('PENDING','CONFIRMED','COMPLETED','FAILED','REFUNDED','CANCELLED'))
 );
-
-CREATE TABLE IF NOT EXISTS finance.government_dues (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    do_number varchar(50) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
-    tax_type varchar(50) NOT NULL,
-    volume_basis numeric(20,6) NOT NULL,
-    tariff_rate numeric(15,2) NOT NULL,
-    total_amount_idr numeric(15,2) NOT NULL,
-    billing_code varchar(50),
-    payment_date date,
-    status varchar(20) DEFAULT 'UNPAID',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_govdues_status CHECK (status IN ('UNPAID','PAID'))
-);
-
--- -----------------------------------------------------------------------------
--- SCHEMA: DOCUMENT
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS document.category (
-    code_category varchar(30) PRIMARY KEY,
-    description varchar(255) NOT NULL,
-    is_active boolean DEFAULT true
-);
-
-CREATE TABLE IF NOT EXISTS document.file_registry (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_category varchar(30) REFERENCES document.category(code_category),
-    file_name varchar(255) NOT NULL,
-    storage_url text NOT NULL,
-    file_hash char(64) NOT NULL,
-    storage_provider varchar(50) NOT NULL,
-    storage_object_key text NOT NULL,
-    version_number integer NOT NULL DEFAULT 1,
-    mime_type varchar(50) NOT NULL,
-    size_kb numeric(15,3) NOT NULL,
-    is_confidential boolean DEFAULT false,
-    uploaded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    uploaded_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS document.entity_link (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    document_id bigint REFERENCES document.file_registry(id) ON DELETE CASCADE,
-    reference_document varchar(100) NOT NULL,
-    linked_at timestamptz NOT NULL DEFAULT now()
-);
-
--- -----------------------------------------------------------------------------
--- SCHEMA: ENVIRO
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS enviro.station_info (
-    code_station varchar(20) PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    station_type varchar(50) NOT NULL,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    battery_level double precision,
-    last_maintenance date,
-    status varchar(20) DEFAULT 'ACTIVE',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_station_status CHECK (status IN ('ACTIVE','INACTIVE','MAINTENANCE'))
-);
-
-CREATE TABLE IF NOT EXISTS enviro.station_reading (
-    id bigint GENERATED ALWAYS AS IDENTITY,
-    code_station varchar(20) REFERENCES enviro.station_info(code_station) ON DELETE CASCADE,
-    record_time timestamptz NOT NULL DEFAULT now(),
-    salinity double precision,
-    turbidity double precision,
-    current_speed double precision,
-    dissolved_oxygen double precision,
-    water_density double precision,
-    tide_level double precision,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (id, record_time) 
-) PARTITION BY RANGE (record_time);
-
--- Partisi default sebagai jaring pengaman
-CREATE TABLE IF NOT EXISTS enviro.station_reading_default
-    PARTITION OF enviro.station_reading DEFAULT;
-
-CREATE TABLE IF NOT EXISTS enviro.incident (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
-    reported_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    incident_time timestamptz NOT NULL,
-    incident_type varchar(50) NOT NULL,
-    severity varchar(20) NOT NULL,
-    description text NOT NULL,
-    action_taken text,
-    status varchar(20) DEFAULT 'INVESTIGATING',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_incident_status CHECK (status IN ('INVESTIGATING','RESOLVED','CLOSED'))
-);
-
--- -----------------------------------------------------------------------------
--- SCHEMA: FORM
--- -----------------------------------------------------------------------------
-
-CREATE TABLE IF NOT EXISTS form.water_sampling (
-    no_form varchar(20) PRIMARY KEY,
-    type_site varchar(20) NOT NULL,
-    sampling_date date NOT NULL,
-    type_sample varchar(20) NOT NULL,
-    total_sample numeric NOT NULL,
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    received_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    status varchar(20) DEFAULT 'SUBMITTED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_ws_status CHECK (status IN ('SUBMITTED','APPROVED','RECEIVED','REJECTED')),
-    CONSTRAINT chk_ws_typ_site CHECK (type_site IN ('CTRL_SITE','ON_SITE','OFF_SITE'))
-);
-
-CREATE TABLE IF NOT EXISTS enviro.water_quality (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.water_sampling(no_form) ON DELETE CASCADE,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    depth numeric NOT NULL,
-    brightness numeric NOT NULL,
-    temperature numeric NOT NULL,
-    turbidity numeric NOT NULL,
-    dissolved_oxygen numeric NOT NULL,
-    ph_level numeric NOT NULL,
-    salt numeric NOT NULL,
-    condition varchar(250) NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS enviro.water_sampling_draft (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.water_sampling(no_form) ON DELETE CASCADE,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    depth numeric NOT NULL,
-    brightness numeric NOT NULL,
-    temperature numeric NOT NULL,
-    turbidity numeric NOT NULL,
-    dissolved_oxygen numeric NOT NULL,
-    ph_level numeric NOT NULL,
-    salt numeric NOT NULL,
-    condition varchar(250) NOT NULL,
-    status VARCHAR(20) DEFAULT 'PENDING',
-    created_by VARCHAR(50),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    archived_at timestamptz,
-    CONSTRAINT chk_wsd_status CHECK (status IN ('PENDING','APPROVED','REJECTED')),
-    CONSTRAINT chk_wsd_created_by CHECK (created_by IN (SELECT code_user FROM usr.info))
-);
-
-CREATE TABLE IF NOT EXISTS enviro.parameter_threshold (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    parameter_name varchar(50) NOT NULL,
-    parameter_value double precision,
-    uom varchar(10),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz
-);
-
-CREATE TABLE IF NOT EXISTS enviro.weather_log (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    log_time timestamptz NOT NULL DEFAULT now(),
-    weather_condition varchar(50) NOT NULL,
-    wind_speed double precision,
-    wave_height double precision,
-    description text,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS enviro.compliance_report (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    report_type varchar(50) NOT NULL,
-    period_start date NOT NULL,
-    period_end date NOT NULL,
-    code_site varchar(20) REFERENCES site.info(code_site),
-    submitted_to varchar(100),
-    submission_date date,
-    report_url text,
-    status varchar(20) DEFAULT 'DRAFT',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz,
-    CONSTRAINT chk_compliance_status CHECK (status IN ('DRAFT','SUBMITTED','APPROVED','REJECTED'))
-);
-
-CREATE TABLE IF NOT EXISTS form.sampling_worksheet (
-    no_form varchar(20) PRIMARY KEY,
-    sampling_date date NOT NULL,
-    no_package numeric NOT NULL,
-    type_sample varchar(20) NOT NULL,
-    sample_total numeric NOT NULL,
-    survey_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
-    approved_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    remarks_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    status varchar(20) DEFAULT 'SUBMITTED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_sws_status CHECK (status IN ('SUBMITTED','APPROVED','REJECTED'))
-);
-
-CREATE TABLE IF NOT EXISTS form.sampling_worksheet_detail (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.sampling_worksheet(no_form) ON DELETE CASCADE,
-    no_sample varchar(20) NOT NULL,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    geom geometry(Point, 4326) GENERATED ALWAYS AS (
-        ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
-    ) STORED,
-    description varchar(255) NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS form.volumetric_calc (
-    no_form varchar(20) PRIMARY KEY,
-    no_delivery varchar(20) REFERENCES operational.delivery_order(do_number) ON DELETE SET NULL,
-    empty_draft numeric(20,6) NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS form.volumetric_calc_detail (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.volumetric_calc(no_form) ON DELETE CASCADE,
-    calc_type varchar(20) NOT NULL,
-    volume numeric(20,6) NOT NULL,
-    date_measured date NOT NULL,
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_volumetric_calc_type CHECK (calc_type IN ('DRAFT','FINAL'))
-);
-
-CREATE TABLE IF NOT EXISTS form.station_inspection (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_station varchar(20) REFERENCES enviro.station_info(code_station) ON DELETE CASCADE,
-    code_user varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    inspection_date date NOT NULL,
-    inspection_type varchar(20) NOT NULL,
-    weather_condition text,
-    inspected_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    reviewed_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    status varchar(20) DEFAULT 'SUBMITTED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_station_inspection_status CHECK (status IN ('SUBMITTED','REVIEWED','REJECTED'))
-);
-
-CREATE TABLE IF NOT EXISTS form.station_inspection_details (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    id_inspection bigint REFERENCES form.station_inspection(id) ON DELETE CASCADE,
-    equipment_name varchar(50) NOT NULL,
-    equipment_condition text,
-    description text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_equipment_condition CHECK (equipment_condition IN ('OK','NOTE OK', 'N/A'))
-);
-
-CREATE TABLE IF NOT EXISTS form.daily_activities (
-    no_form varchar(20) PRIMARY KEY,
-    code_vessel varchar(20) REFERENCES vessel.info(code_vessel) ON DELETE SET NULL,
-    activitie_date date NOT NULL,
-    description text NOT NULL,
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    created_at timestamptz DEFAULT now ()
-);
-
-CREATE TABLE IF NOT EXISTS form.daily_activities_details (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.daily_activities(no_form) ON DELETE CASCADE,
-    date_activities date NOT NULL,
-    time_activities time NOT NULL,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    geom geometry(Point, 4326) GENERATED ALWAYS AS (
-        ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
-    ) STORED,
-    run_hours_in time NOT NULL,
-    run_hours_out time NOT NULL,
-    description text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS form.daily_activities_weather (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.daily_activities(no_form) ON DELETE CASCADE,
-    date_weather date NOT NULL,
-    time_weather time NOT NULL,
-    wind_speed numeric NOT NULL,
-    wave_height numeric NOT NULL,
-    description text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS form.monitoring_survey (
-    no_form varchar(20) PRIMARY KEY,
-    survey_date date NOT NULL,
-    survey_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    recorded_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    reviewed_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    status varchar(20) DEFAULT 'SUBMITTED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_monitoring_survey_status CHECK (status IN ('SUBMITTED','REVIEWED','REJECTED'))
-);
-
-CREATE TABLE IF NOT EXISTS form.monitoring_survey_details (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    no_form varchar(20) REFERENCES form.monitoring_survey(no_form) ON DELETE CASCADE,
-    latitude numeric(10,7) NOT NULL,
-    longitude numeric(10,7) NOT NULL,
-    geom geometry(Point, 4326) GENERATED ALWAYS AS (
-        ST_SetSRID(ST_MakePoint(longitude::float8, latitude::float8), 4326)
-    ) STORED,
-    station_id varchar(20) REFERENCES enviro.station_info(code_station) ON DELETE SET NULL,
-    depth_d numeric NOT NULL,
-    depth_m numeric NOT NULL,
-    time_deploy time NOT NULL,
-    time_undeploy time NOT NULL,
-    description text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-
--- -----------------------------------------------------------------------------
--- SCHEMA: AUDIT
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS audit.activity_log (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    event_id uuid NOT NULL DEFAULT gen_random_uuid(),
-    code_user varchar(20) NOT NULL,
-    action_type varchar(20) NOT NULL,
-    schema_name varchar(50) NOT NULL,
-    table_name varchar(50) NOT NULL,
-    record_id varchar(50) NOT NULL,
-    old_data jsonb,
-    new_data jsonb,
-    request_id uuid,
-    transaction_id bigint,
-    ip_address inet,
-    user_agent text,
-    created_at timestamptz NOT NULL DEFAULT now()
-);
-COMMENT ON COLUMN audit.activity_log.code_user IS 'Tidak ada FK ke usr.info karena log dapat mencatat aktivitas sistem atau user yang sudah dihapus.';
-
-CREATE TABLE IF NOT EXISTS audit.error_log (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    error_source varchar(50) NOT NULL,
-    severity varchar(20) NOT NULL DEFAULT 'ERROR',
-    error_code varchar(50),
-    error_message text NOT NULL,
-    stack_trace text,
-    payload_data jsonb,
-    request_id uuid,
-    correlation_id uuid,
-    service_name varchar(100),
-    environment varchar(20) DEFAULT 'production',
-    resolved_status boolean DEFAULT false,
-    resolved_by varchar(20) REFERENCES usr.info(code_user) ON DELETE SET NULL,
-    resolved_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT chk_error_log_severity CHECK (severity IN ('DEBUG','INFO','WARNING','ERROR','CRITICAL')),
-    CONSTRAINT chk_error_log_environment CHECK (environment IN ('development','staging','production'))
-);
-
-CREATE TABLE IF NOT EXISTS audit.login_history (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    code_user varchar(20) NOT NULL,
-    login_time timestamptz NOT NULL DEFAULT now(),
-    ip_address inet,
-    user_agent text,
-    status varchar(20) NOT NULL,
-    failure_reason text,
-    CONSTRAINT chk_login_status CHECK (status IN ('SUCCESS','FAILED'))
-);
-
--- -----------------------------------------------------------------------------
--- VIEWS
--- -----------------------------------------------------------------------------
-
--- View untuk validasi nilai turunan invoice
-CREATE OR REPLACE VIEW finance.v_invoice_summary AS
-SELECT 
-    i.invoice_number,
-    COALESCE(i.subtotal, 0) AS stored_subtotal,
-    COALESCE(item_sum.total_item, 0) AS calculated_subtotal,
-    COALESCE(i.total_amount, 0) AS stored_total,
-    COALESCE(item_sum.total_item, 0) + COALESCE(tax_sum.total_tax, 0) AS calculated_total,
-    CASE 
-        WHEN COALESCE(i.subtotal, 0) = COALESCE(item_sum.total_item, 0)
-         AND COALESCE(i.total_amount, 0) = COALESCE(item_sum.total_item, 0) + COALESCE(tax_sum.total_tax, 0)
-        THEN 'VALID' ELSE 'MISMATCH' 
-    END AS integrity_check
-FROM finance.invoice i
-LEFT JOIN (
-    SELECT invoice_number, SUM(total_price) AS total_item
-    FROM finance.invoice_item
-    GROUP BY invoice_number
-) item_sum ON i.invoice_number = item_sum.invoice_number
-LEFT JOIN (
-    SELECT invoice_number, SUM(tax_amount) AS total_tax
-    FROM finance.invoice_tax
-    GROUP BY invoice_number
-) tax_sum ON i.invoice_number = tax_sum.invoice_number;
-
--- View untuk enviro
-CREATE OR REPLACE VIEW enviro.v_monitoring_enviro AS
-SELECT DISTINCT ON (a.code_station)
-    a.code_station,
-    a.salinity,
-    a.turbidity,
-    a.current_speed,
-    a.dissolved_oxygen,
-    a.water_density,
-    a.tide_level
-FROM 
-    enviro.station_reading a
-ORDER BY 
-    a.code_station, 
-    a.record_time DESC;
-
--- View untuk Produksi vs Sisa Stok.
-CREATE OR REPLACE VIEW operational.v_production_chart AS
-WITH daily_delta AS (
-    SELECT
-        code_site,
-        transaction_time::date AS tgl,
-        SUM(quantity_delta) AS day_delta,
-        SUM(CASE WHEN transaction_type = 'PRODUCTION' THEN quantity ELSE 0 END) AS day_production
-    FROM operational.stock_ledger
-    GROUP BY code_site, transaction_time::date
-)
-SELECT
-    code_site,
-    tgl,
-    day_production AS total_produksi,
-    SUM(day_delta) OVER (
-        PARTITION BY code_site ORDER BY tgl
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS total_deduction
-FROM daily_delta
-ORDER BY code_site, tgl;
-
--- View saldo stok terkini per site.
-CREATE OR REPLACE VIEW operational.v_stock_balance AS
-SELECT
-    code_site,
-    SUM(quantity_delta) AS current_balance,
-    MAX(transaction_time) AS last_transaction_time
-FROM operational.stock_ledger
-GROUP BY code_site;
 
 -- =============================================================================
--- AUTOMATION FUNCTIONS
+-- 16. DOCUMENTS
 -- =============================================================================
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+
+CREATE TABLE IF NOT EXISTS documents.document_category (
+    category_code       varchar(30) PRIMARY KEY,
+    name                varchar(100) NOT NULL,
+    description         text,
+    is_active           boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS documents.document (
+    document_id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    category_code       varchar(30) REFERENCES documents.document_category(category_code),
+    document_number     varchar(100),
+    title               varchar(255) NOT NULL,
+    description         text,
+    classification      varchar(20) NOT NULL DEFAULT 'INTERNAL',
+    created_by          varchar(20),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_doc_classification CHECK (classification IN ('PUBLIC','INTERNAL','CONFIDENTIAL','RESTRICTED'))
+);
+
+CREATE TABLE IF NOT EXISTS documents.document_version (
+    version_id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    document_id         bigint NOT NULL REFERENCES documents.document(document_id),
+    version_number      integer NOT NULL,
+    file_name           varchar(255) NOT NULL,
+    storage_url         text NOT NULL,
+    file_hash           varchar(64) NOT NULL,
+    file_size_bytes     bigint,
+    mime_type           varchar(50),
+    uploaded_by         varchar(20),
+    is_current          boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT uq_doc_version UNIQUE (document_id, version_number)
+);
+
+CREATE TABLE IF NOT EXISTS documents.document_relation (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    document_id         bigint NOT NULL REFERENCES documents.document(document_id),
+    entity_type         varchar(50) NOT NULL,
+    entity_id           varchar(50) NOT NULL,
+    relation_type       varchar(30) NOT NULL DEFAULT 'ATTACHMENT',
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE documents.document_relation IS 'Polymorphic relation — links documents to any entity (PO, Clearance, Survey, Voyage, Invoice, etc.)';
+
+CREATE TABLE IF NOT EXISTS documents.document_approval (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    document_id         bigint NOT NULL REFERENCES documents.document(document_id),
+    version_id          bigint REFERENCES documents.document_version(version_id),
+    approval_status     varchar(20) NOT NULL DEFAULT 'PENDING',
+    approved_by         varchar(20),
+    approved_at         timestamptz,
+    remarks             text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_doc_approval_status CHECK (approval_status IN ('PENDING','APPROVED','REJECTED','REVOKED'))
+);
+
+-- =============================================================================
+-- 17. SECURITY — RBAC
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS security.role (
+    role_code           varchar(30) PRIMARY KEY,
+    name                varchar(100) NOT NULL,
+    description         text,
+    is_active           boolean NOT NULL DEFAULT true,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS security.permission (
+    permission_code     varchar(50) PRIMARY KEY,
+    module              varchar(50) NOT NULL,
+    action              varchar(30) NOT NULL,
+    description         text,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS security.role_permission (
+    role_code           varchar(30) NOT NULL REFERENCES security.role(role_code),
+    permission_code     varchar(50) NOT NULL REFERENCES security.permission(permission_code),
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (role_code, permission_code)
+);
+
+CREATE TABLE IF NOT EXISTS security.user_account (
+    code_user           varchar(30) PRIMARY KEY,
+    username            varchar(50) NOT NULL UNIQUE,
+    password_hash       varchar(255) NOT NULL,
+    name                varchar(100) NOT NULL,
+    email               varchar(100) UNIQUE,
+    role_code           varchar(30) REFERENCES security.role(role_code),
+    org_code            varchar(20) REFERENCES core.organization(org_code),
+    partner_id          varchar(20) REFERENCES core.partner(partner_id),
+    is_active           boolean NOT NULL DEFAULT true,
+    last_login          timestamptz,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz,
+    deleted_at          timestamptz
+);
+
+CREATE TABLE IF NOT EXISTS security.user_contact (
+    id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code_user           varchar(30) NOT NULL REFERENCES security.user_account(code_user),
+    contact_type        varchar(20) NOT NULL,
+    contact_value       varchar(200) NOT NULL,
+    is_primary          boolean NOT NULL DEFAULT false,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- =============================================================================
+-- 18. AUDIT — Immutable Audit Trail
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS audit.audit_event (
+    event_id            uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    code_user           varchar(30),
+    action_type         varchar(20) NOT NULL,
+    schema_name         varchar(50) NOT NULL,
+    table_name          varchar(50) NOT NULL,
+    record_id           varchar(100),
+    old_data            jsonb,
+    new_data            jsonb,
+    correlation_id      uuid,
+    request_id          uuid,
+    client_ip           inet,
+    user_agent          text,
+    data_classification varchar(20),
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE audit.audit_event IS 'Immutable audit trail — no UPDATE or DELETE allowed. No FK to user_account to preserve audit when users are deleted.';
+
+CREATE TABLE IF NOT EXISTS audit.audit_change (
+    change_id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_id            uuid NOT NULL REFERENCES audit.audit_event(event_id),
+    field_name          varchar(100) NOT NULL,
+    old_value           text,
+    new_value           text,
+    created_at          timestamptz NOT NULL DEFAULT now()
+);
+
+-- =============================================================================
+-- 19. INTEGRATION
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS integration.inbox (
+    message_id          uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    source_system       varchar(50) NOT NULL,
+    source_record_id    varchar(100),
+    source_country      char(2),
+    message_type        varchar(50) NOT NULL,
+    message_body        jsonb NOT NULL,
+    status              varchar(30) NOT NULL DEFAULT 'RECEIVED',
+    error_message       text,
+    received_at         timestamptz NOT NULL DEFAULT now(),
+    processed_at        timestamptz,
+    CONSTRAINT chk_inbox_status CHECK (status IN ('RECEIVED','VALIDATED','PROCESSED','FAILED','DUPLICATE'))
+);
+
+CREATE TABLE IF NOT EXISTS integration.outbox (
+    message_id          uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+    target_system       varchar(50) NOT NULL,
+    message_type        varchar(50) NOT NULL,
+    message_body        jsonb NOT NULL,
+    status              varchar(30) NOT NULL DEFAULT 'PENDING',
+    error_message       text,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    sent_at             timestamptz,
+    CONSTRAINT chk_outbox_status CHECK (status IN ('PENDING','SENT','FAILED','RETRY'))
+);
+
+-- =============================================================================
+-- 20. HELPER FUNCTIONS
+-- =============================================================================
+
+-- Auto-update updated_at timestamp
+CREATE OR REPLACE FUNCTION internal.update_updated_at()
+RETURNS trigger
+SET search_path = ''
+AS $$
 BEGIN
     NEW.updated_at = now();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION fn_audit_activity()
-RETURNS TRIGGER 
+-- Generic audit trigger function
+CREATE OR REPLACE FUNCTION internal.audit_trigger()
+RETURNS trigger
 SET search_path = ''
 AS $$
 DECLARE
@@ -1107,37 +1384,18 @@ BEGIN
         v_data := to_jsonb(NEW);
     END IF;
 
-    IF TG_NARGS > 0 THEN
-        v_record_id := v_data ->> TG_ARGV[0];
-    END IF;
-
+    v_record_id := v_data ->> TG_ARGV[0];
     IF v_record_id IS NULL THEN
-        v_record_id := COALESCE(
-            v_data->>'id',
-            v_data->>'code_user',
-            v_data->>'code_vessel',
-            v_data->>'code_site',
-            v_data->>'code_partner',
-            v_data->>'code_buyer',
-            v_data->>'po_number',
-            v_data->>'do_number',
-            v_data->>'invoice_number',
-            v_data->>'payment_number',
-            v_data->>'no_form',
-            v_data->>'code_station',
-            v_data->>'code_role',
-            v_data->>'code_type'
-        );
+        v_record_id := v_data->>'id';
     END IF;
-
     IF v_record_id IS NULL THEN
-        v_record_id := 'COMPOSITE_KEY_OR_UNKNOWN';
+        v_record_id := 'UNKNOWN';
     END IF;
 
-    INSERT INTO audit.activity_log (
+    INSERT INTO audit.audit_event (
         code_user, action_type, schema_name, table_name,
         record_id, old_data, new_data,
-        request_id, transaction_id, ip_address, user_agent, created_at
+        correlation_id, request_id, client_ip, user_agent, created_at
     ) VALUES (
         COALESCE(current_setting('app.current_user', true), 'SYSTEM'),
         TG_OP,
@@ -1146,339 +1404,203 @@ BEGIN
         v_record_id,
         CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END,
         CASE WHEN TG_OP IN ('INSERT','UPDATE') THEN to_jsonb(NEW) ELSE NULL END,
+        NULLIF(current_setting('app.correlation_id', true), '')::uuid,
         NULLIF(current_setting('app.request_id', true), '')::uuid,
-        pg_catalog.txid_current(),
         NULLIF(current_setting('app.client_ip', true), '')::inet,
         NULLIF(current_setting('app.user_agent', true), ''),
         now()
     );
-    
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION update_buyer_deposit_balance()
-RETURNS TRIGGER 
-SET search_path = '' 
-AS $$
-DECLARE
-    v_balance NUMERIC(15,2);
-    v_target_buyer VARCHAR(20); 
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        v_target_buyer := OLD.code_buyer;
-    ELSE
-        v_target_buyer := NEW.code_buyer;
-    END IF;
-
-    SELECT COALESCE(SUM(CASE WHEN transaction_type = 'CREDIT' THEN amount ELSE -amount END), 0)
-    INTO v_balance
-    FROM buyer.deposit_ledger
-    WHERE code_buyer = v_target_buyer;
-
-    UPDATE buyer.info
-    SET deposit_balance = v_balance,
-        updated_at = now()
-    WHERE code_buyer = v_target_buyer;
 
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 
-
-CREATE OR REPLACE FUNCTION fn_approve_water_sampling()
-RETURNS TRIGGER 
-SET search_path = ''
-AS $$
-BEGIN
-    IF NEW.status = 'APPROVED' AND OLD.status != 'APPROVED' THEN
-        INSERT INTO enviro.water_quality (
-            no_form, 
-            latitude, 
-            longitude, 
-            depth, 
-            brightness, 
-            temperature, 
-            turbidity, 
-            dissolved_oxygen, 
-            ph_level, 
-            salt, 
-            condition, 
-            created_at
-        )
-        SELECT 
-            d.no_form, 
-            d.latitude, 
-            d.longitude, 
-            d.depth, 
-            d.brightness, 
-            d.temperature, 
-            d.turbidity, 
-            d.dissolved_oxygen, 
-            d.ph_level, 
-            d.salt, 
-            d.condition, 
-            now()
-        FROM enviro.water_sampling_draft d
-        WHERE d.no_form = NEW.no_form
-          AND d.archived_at IS NULL
-          AND NOT EXISTS (
-              SELECT 1 FROM enviro.water_quality wq WHERE wq.no_form = NEW.no_form
-          ); 
-
-        UPDATE enviro.water_sampling_draft
-        SET archived_at = now()
-        WHERE no_form = NEW.no_form
-          AND archived_at IS NULL;
-
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION internal.automasi_partisi_bulanan()
-RETURNS void 
-SECURITY DEFINER 
+-- Auto-partition management
+CREATE OR REPLACE FUNCTION internal.create_monthly_partitions()
+RETURNS void
+SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    v_tabel_induk TEXT;
-    v_daftar_tabel TEXT[] := ARRAY['vessel.movement_log', 'enviro.station_reading'];
-    v_skema TEXT;
-    v_nama_tabel TEXT;
-    v_nama_partisi TEXT;
-    v_waktu_target DATE;
-    v_awal_bulan DATE;
-    v_akhir_bulan DATE;
+    v_parents TEXT[] := ARRAY[
+        'tracking.ais_position'
+    ];
+    v_parent TEXT;
+    v_schema TEXT;
+    v_table TEXT;
+    v_partition_name TEXT;
+    v_target DATE;
+    v_start DATE;
+    v_end DATE;
 BEGIN
     FOR i IN 0..2 LOOP
-        v_waktu_target := date_trunc('month', CURRENT_DATE + (i || ' month')::interval)::date;
-        v_awal_bulan := v_waktu_target;
-        v_akhir_bulan := v_waktu_target + interval '1 month';
-        FOREACH v_tabel_induk IN ARRAY v_daftar_tabel LOOP
-            v_skema := split_part(v_tabel_induk, '.', 1);
-            v_nama_tabel := split_part(v_tabel_induk, '.', 2);
-            v_nama_partisi := v_nama_tabel || '_' || to_char(v_waktu_target, 'YYYYMM');
+        v_target := date_trunc('month', CURRENT_DATE + (i || ' month')::interval)::date;
+        v_start := v_target;
+        v_end := v_target + interval '1 month';
+        FOREACH v_parent IN ARRAY v_parents LOOP
+            v_schema := split_part(v_parent, '.', 1);
+            v_table := split_part(v_parent, '.', 2);
+            v_partition_name := v_table || '_' || to_char(v_target, 'YYYYMM');
             IF NOT EXISTS (
-                SELECT 1
-                FROM pg_catalog.pg_class c
+                SELECT 1 FROM pg_catalog.pg_class c
                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                WHERE n.nspname = v_skema AND c.relname = v_nama_partisi
+                WHERE n.nspname = v_schema AND c.relname = v_partition_name
             ) THEN
                 EXECUTE format(
                     'CREATE TABLE %I.%I PARTITION OF %I.%I FOR VALUES FROM (%L) TO (%L);',
-                    v_skema, v_nama_partisi, v_skema, v_nama_tabel, v_awal_bulan, v_akhir_bulan
+                    v_schema, v_partition_name, v_schema, v_table, v_start, v_end
                 );
-                IF EXISTS (
-                    SELECT 1 FROM pg_catalog.pg_class c
-                    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                    WHERE n.nspname = v_skema AND c.relname = v_nama_tabel || '_default'
-                ) THEN
-                    EXECUTE format(
-                        'WITH moved AS (
-                            DELETE FROM %I.%I
-                            WHERE %I >= %L AND %I < %L
-                            RETURNING *
-                        )
-                        INSERT INTO %I.%I SELECT * FROM moved;',
-                        v_skema, v_nama_tabel || '_default',
-                        CASE WHEN v_nama_tabel = 'movement_log' THEN 'log_time' ELSE 'record_time' END,
-                        v_awal_bulan,
-                        CASE WHEN v_nama_tabel = 'movement_log' THEN 'log_time' ELSE 'record_time' END,
-                        v_akhir_bulan,
-                        v_skema, v_nama_tabel
-                    );
-                END IF;
             END IF;
         END LOOP;
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
 
-
-CREATE OR REPLACE FUNCTION operational.post_production_to_ledger()
-RETURNS TRIGGER
-SET search_path = ''
-AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        DELETE FROM operational.stock_ledger
-        WHERE reference_type = 'daily_production'
-          AND reference_id = OLD.id::text;
-        RETURN OLD;
-    END IF;
-
-    IF TG_OP = 'INSERT' THEN
-        INSERT INTO operational.stock_ledger (
-            code_site, transaction_time, transaction_type,
-            reference_type, reference_id, quantity, direction,
-            created_by, remarks
-        ) VALUES (
-            NEW.code_site, NEW.production_date::timestamptz, 'PRODUCTION',
-            'daily_production', NEW.id::text, NEW.volume_mined, -1,
-            NEW.reported_by, 'Auto-posted from operational.daily_production'
-        );
-        RETURN NEW;
-    END IF;
-
-    UPDATE operational.stock_ledger
-    SET code_site = NEW.code_site,
-        transaction_time = NEW.production_date::timestamptz,
-        quantity = NEW.volume_mined,
-        created_by = NEW.reported_by
-    WHERE reference_type = 'daily_production'
-      AND reference_id = NEW.id::text;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
 -- =============================================================================
--- TRIGGERS, INDEXES, & CONSTRAINTS
+-- 21. TRIGGERS
 -- =============================================================================
 
--- A. AUTOMATION TRIGGERS
-DROP TRIGGER IF EXISTS trg_update_usr_info ON usr.info;
-CREATE TRIGGER trg_update_usr_info BEFORE UPDATE ON usr.info FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+-- updated_at triggers on key tables
+CREATE TRIGGER trg_core_partner_updated BEFORE UPDATE ON core.partner
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_fleet_vessel_updated BEFORE UPDATE ON fleet.vessel
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_commercial_po_updated BEFORE UPDATE ON commercial.purchase_order
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_logistics_shipment_updated BEFORE UPDATE ON logistics.shipment
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_voyage_updated BEFORE UPDATE ON voyage.voyage
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_finance_invoice_updated BEFORE UPDATE ON finance.invoice
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_finance_payment_updated BEFORE UPDATE ON finance.payment
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
+CREATE TRIGGER trg_security_user_updated BEFORE UPDATE ON security.user_account
+    FOR EACH ROW EXECUTE FUNCTION internal.update_updated_at();
 
-DROP TRIGGER IF EXISTS trg_update_vessel_info ON vessel.info;
-CREATE TRIGGER trg_update_vessel_info BEFORE UPDATE ON vessel.info FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+-- Audit triggers on critical tables
+CREATE TRIGGER trg_audit_partner AFTER INSERT OR UPDATE OR DELETE ON core.partner
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('partner_id');
+CREATE TRIGGER trg_audit_vessel AFTER INSERT OR UPDATE OR DELETE ON fleet.vessel
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('vessel_id');
+CREATE TRIGGER trg_audit_po AFTER INSERT OR UPDATE OR DELETE ON commercial.purchase_order
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('po_number');
+CREATE TRIGGER trg_audit_shipment AFTER INSERT OR UPDATE OR DELETE ON logistics.shipment
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('shipment_id');
+CREATE TRIGGER trg_audit_voyage AFTER INSERT OR UPDATE OR DELETE ON voyage.voyage
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('voyage_id');
+CREATE TRIGGER trg_audit_clearance AFTER INSERT OR UPDATE OR DELETE ON regulatory.clearance
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('clearance_id');
+CREATE TRIGGER trg_audit_invoice AFTER INSERT OR UPDATE OR DELETE ON finance.invoice
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('invoice_number');
+CREATE TRIGGER trg_audit_payment AFTER INSERT OR UPDATE OR DELETE ON finance.payment
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('payment_number');
+CREATE TRIGGER trg_audit_cargo AFTER INSERT OR UPDATE OR DELETE ON cargo.cargo
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('cargo_id');
+CREATE TRIGGER trg_audit_survey AFTER INSERT OR UPDATE OR DELETE ON survey.survey
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('survey_id');
+CREATE TRIGGER trg_audit_user AFTER INSERT OR UPDATE OR DELETE ON security.user_account
+    FOR EACH ROW EXECUTE FUNCTION internal.audit_trigger('code_user');
 
-DROP TRIGGER IF EXISTS trg_update_po ON operational.purchase_order;
-CREATE TRIGGER trg_update_po BEFORE UPDATE ON operational.purchase_order FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+-- =============================================================================
+-- 22. INDEXES
+-- =============================================================================
 
-DROP TRIGGER IF EXISTS trg_update_do ON operational.delivery_order;
-CREATE TRIGGER trg_update_do BEFORE UPDATE ON operational.delivery_order FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+-- Reference Data
+CREATE INDEX IF NOT EXISTS idx_ref_country_iso ON ref.country (iso_alpha2, iso_alpha3);
 
-DROP TRIGGER IF EXISTS trg_update_invoice ON finance.invoice;
-CREATE TRIGGER trg_update_invoice BEFORE UPDATE ON finance.invoice FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+-- Core
+CREATE INDEX IF NOT EXISTS idx_core_partner_name ON core.partner (name);
+CREATE INDEX IF NOT EXISTS idx_core_partner_country ON core.partner (country_id);
+CREATE INDEX IF NOT EXISTS idx_core_partner_role ON core.partner_role (partner_id, role_code, is_current);
+CREATE INDEX IF NOT EXISTS idx_core_partner_address_geo ON core.partner_address USING GIST (geom);
 
-DROP TRIGGER IF EXISTS trg_update_deposit_ledger ON buyer.deposit_ledger;
-CREATE TRIGGER trg_update_deposit_ledger BEFORE UPDATE ON buyer.deposit_ledger FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
+-- Port
+CREATE INDEX IF NOT EXISTS idx_port_unlocode ON port.port (un_locode);
+CREATE INDEX IF NOT EXISTS idx_port_country ON port.port (country_id);
+CREATE INDEX IF NOT EXISTS idx_port_geom ON port.port USING GIST (geom);
 
--- B. TRIGGER UNTUK AUDIT OTOMATIS
-DROP TRIGGER IF EXISTS trg_audit_usr_info ON usr.info;
-CREATE TRIGGER trg_audit_usr_info AFTER INSERT OR UPDATE OR DELETE ON usr.info FOR EACH ROW EXECUTE PROCEDURE fn_audit_activity();
+-- Fleet
+CREATE INDEX IF NOT EXISTS idx_fleet_vessel_imo ON fleet.vessel (imo_number);
+CREATE INDEX IF NOT EXISTS idx_fleet_vessel_mmsi ON fleet.vessel (mmsi);
+CREATE INDEX IF NOT EXISTS idx_fleet_vessel_flag ON fleet.vessel (flag_country_id);
+CREATE INDEX IF NOT EXISTS idx_fleet_vessel_partner ON fleet.vessel_partner (vessel_id, partner_id, is_current);
 
-DROP TRIGGER IF EXISTS trg_audit_vessel_info ON vessel.info;
-CREATE TRIGGER trg_audit_vessel_info AFTER INSERT OR UPDATE OR DELETE ON vessel.info FOR EACH ROW EXECUTE PROCEDURE fn_audit_activity();
+-- Commercial
+CREATE INDEX IF NOT EXISTS idx_commercial_po_buyer ON commercial.purchase_order (buyer_partner_id);
+CREATE INDEX IF NOT EXISTS idx_commercial_po_status ON commercial.purchase_order (status);
 
-DROP TRIGGER IF EXISTS trg_audit_po ON operational.purchase_order;
-CREATE TRIGGER trg_audit_po AFTER INSERT OR UPDATE OR DELETE ON operational.purchase_order FOR EACH ROW EXECUTE PROCEDURE fn_audit_activity();
+-- Logistics
+CREATE INDEX IF NOT EXISTS idx_logistics_shipment_vessel ON logistics.shipment (vessel_id);
+CREATE INDEX IF NOT EXISTS idx_logistics_shipment_po ON logistics.shipment (po_number);
 
-DROP TRIGGER IF EXISTS trg_audit_do ON operational.delivery_order;
-CREATE TRIGGER trg_audit_do AFTER INSERT OR UPDATE OR DELETE ON operational.delivery_order FOR EACH ROW EXECUTE PROCEDURE fn_audit_activity();
+-- Voyage
+CREATE INDEX IF NOT EXISTS idx_voyage_vessel ON voyage.voyage (vessel_id);
+CREATE INDEX IF NOT EXISTS idx_voyage_status ON voyage.voyage (status);
+CREATE INDEX IF NOT EXISTS idx_voyage_leg_route ON voyage.voyage_leg (origin_port_id, destination_port_id);
+CREATE INDEX IF NOT EXISTS idx_port_call_voyage ON voyage.port_call (voyage_id);
+CREATE INDEX IF NOT EXISTS idx_port_call_port ON voyage.port_call (port_id);
+CREATE INDEX IF NOT EXISTS idx_port_call_event_type ON voyage.port_call_event (port_call_id, event_type);
 
-DROP TRIGGER IF EXISTS trg_audit_invoice ON finance.invoice;
-CREATE TRIGGER trg_audit_invoice AFTER INSERT OR UPDATE OR DELETE ON finance.invoice FOR EACH ROW EXECUTE PROCEDURE fn_audit_activity();
+-- Regulatory
+CREATE INDEX IF NOT EXISTS idx_clearance_country ON regulatory.clearance (country_id);
+CREATE INDEX IF NOT EXISTS idx_clearance_shipment ON regulatory.clearance (shipment_id);
+CREATE INDEX IF NOT EXISTS idx_clearance_status ON regulatory.clearance (status);
 
-DROP TRIGGER IF EXISTS trg_audit_payment ON finance.payment;
-CREATE TRIGGER trg_audit_payment AFTER INSERT OR UPDATE OR DELETE ON finance.payment FOR EACH ROW EXECUTE PROCEDURE fn_audit_activity();
+-- Cargo
+CREATE INDEX IF NOT EXISTS idx_cargo_shipment ON cargo.cargo (shipment_id);
+CREATE INDEX IF NOT EXISTS idx_cargo_movement_cargo ON cargo.cargo_movement (cargo_id);
+CREATE INDEX IF NOT EXISTS idx_cargo_movement_time ON cargo.cargo_movement (movement_time);
+CREATE INDEX IF NOT EXISTS idx_quantity_measurement_cargo ON cargo.quantity_measurement (cargo_id);
 
-DROP TRIGGER IF EXISTS trg_post_production_to_ledger ON operational.daily_production;
-CREATE TRIGGER trg_post_production_to_ledger
-AFTER INSERT OR UPDATE OR DELETE ON operational.daily_production
-FOR EACH ROW
-EXECUTE FUNCTION operational.post_production_to_ledger();
+-- Survey
+CREATE INDEX IF NOT EXISTS idx_survey_voyage ON survey.survey (voyage_id);
+CREATE INDEX IF NOT EXISTS idx_survey_sample_cargo ON survey.sample (cargo_id);
+CREATE INDEX IF NOT EXISTS idx_survey_sample_status ON survey.sample (status);
 
--- C. TRIGGER UNTUK SALDO DEPOSIT BUYER
-DROP TRIGGER IF EXISTS trg_update_deposit_balance ON buyer.deposit_ledger;
-CREATE TRIGGER trg_update_deposit_balance
-AFTER INSERT OR UPDATE OR DELETE ON buyer.deposit_ledger
-FOR EACH ROW EXECUTE PROCEDURE update_buyer_deposit_balance();
+-- Tracking
+CREATE INDEX IF NOT EXISTS idx_ais_vessel_time ON tracking.ais_position (vessel_id, record_time DESC);
+CREATE INDEX IF NOT EXISTS idx_ais_geom ON tracking.ais_position USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_vessel_track_voyage ON tracking.vessel_track (vessel_id, voyage_id);
 
-DROP TRIGGER IF EXISTS trg_approve_water ON enviro.water_sampling_draft;
-CREATE TRIGGER trg_approve_water
-AFTER UPDATE ON enviro.water_sampling_draft
-FOR EACH ROW EXECUTE PROCEDURE fn_approve_water_sampling();
+-- Environment
+CREATE INDEX IF NOT EXISTS idx_env_station_site ON environment.station (site_code);
+CREATE INDEX IF NOT EXISTS idx_env_observation_time ON environment.observation (station_id, observed_at DESC);
 
--- D. PERFORMANCE INDEXES
-CREATE INDEX IF NOT EXISTS idx_audit_activity_user ON audit.activity_log (code_user);
-CREATE INDEX IF NOT EXISTS idx_audit_activity_table ON audit.activity_log (table_name, record_id);
-CREATE INDEX IF NOT EXISTS idx_audit_activity_time ON audit.activity_log (created_at);
-CREATE INDEX IF NOT EXISTS idx_op_do_po ON operational.delivery_order (po_number);
-CREATE INDEX IF NOT EXISTS idx_op_do_vessel ON operational.delivery_order (code_vessel_main);
-CREATE INDEX IF NOT EXISTS idx_op_survey_do ON operational.cargo_survey (do_number);
-CREATE INDEX IF NOT EXISTS idx_op_bl_do ON operational.bill_of_lading (do_number);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_buyer ON finance.invoice (code_buyer);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_partner ON finance.invoice (code_partner);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_do ON finance.invoice (do_number);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_del_do ON finance.invoice_delivery_order (do_number);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_del_inv ON finance.invoice_delivery_order (invoice_number);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_item_inv ON finance.invoice_item (invoice_number);
-CREATE INDEX IF NOT EXISTS idx_fin_inv_tax_inv ON finance.invoice_tax (invoice_number);
-CREATE INDEX IF NOT EXISTS idx_fin_payment_invoice ON finance.payment (invoice_number);
-CREATE INDEX IF NOT EXISTS idx_fin_payment_date ON finance.payment (payment_date);
-CREATE INDEX IF NOT EXISTS idx_env_station_reading_time ON enviro.station_reading (record_time);
-CREATE INDEX IF NOT EXISTS idx_doc_link_ref ON document.entity_link (reference_document);
-CREATE INDEX IF NOT EXISTS idx_vessel_movement_time ON vessel.movement_log (code_vessel, log_time);
-CREATE INDEX IF NOT EXISTS idx_vessel_movement_geom ON vessel.movement_log USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_form_sw_detail_geom ON form.sampling_worksheet_detail USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_form_dailyact_det_geom ON form.daily_activities_details USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_form_monsurv_det_geom ON form.monitoring_survey_details USING GIST (geom);
-CREATE INDEX IF NOT EXISTS idx_env_weather_time ON enviro.weather_log (code_site, log_time);
-CREATE INDEX IF NOT EXISTS idx_daily_prod_site ON operational.daily_production (code_site);
-CREATE INDEX IF NOT EXISTS idx_stock_ledger_site_time ON operational.stock_ledger (code_site, transaction_time);
-CREATE INDEX IF NOT EXISTS idx_stock_ledger_reference ON operational.stock_ledger (reference_type, reference_id);
-CREATE INDEX IF NOT EXISTS idx_daily_prod_vessel ON operational.daily_production (code_vessel);
-CREATE INDEX IF NOT EXISTS idx_gov_dues_do ON finance.government_dues (do_number);
-CREATE INDEX IF NOT EXISTS idx_op_sofp_do ON operational.statement_of_fact (do_number);
-CREATE INDEX IF NOT EXISTS idx_movement_log_do ON vessel.movement_log (do_number);
-CREATE INDEX IF NOT EXISTS idx_approval_ref ON operational.approval_log (ref_table, ref_id);
-CREATE INDEX IF NOT EXISTS idx_notification_log_time ON param.notification_log (sent_at);
-CREATE INDEX IF NOT EXISTS idx_buyer_deposit_ledger ON buyer.deposit_ledger (code_buyer);
-CREATE INDEX IF NOT EXISTS idx_env_incident_status ON enviro.incident (status, severity);
-CREATE INDEX IF NOT EXISTS idx_form_sw_detail_no ON form.sampling_worksheet_detail (no_form);
-CREATE INDEX IF NOT EXISTS idx_form_volcalc_detail_no ON form.volumetric_calc_detail (no_form);
-CREATE INDEX IF NOT EXISTS idx_form_insp_detail_id ON form.station_inspection_details (id_inspection);
-CREATE INDEX IF NOT EXISTS idx_form_dailyact_detail_no ON form.daily_activities_details (no_form);
-CREATE INDEX IF NOT EXISTS idx_form_dailyact_wea_no ON form.daily_activities_weather (no_form);
-CREATE INDEX IF NOT EXISTS idx_form_monsurv_detail_no ON form.monitoring_survey_details (no_form);
-CREATE INDEX IF NOT EXISTS idx_form_volcalc_do ON form.volumetric_calc (no_delivery);
-CREATE INDEX IF NOT EXISTS idx_form_insp_station ON form.station_inspection (code_station);
-CREATE INDEX IF NOT EXISTS idx_form_monsurv_det_station ON form.monitoring_survey_details (station_id); 
-CREATE INDEX IF NOT EXISTS idx_form_dailyact_vessel ON form.daily_activities (code_vessel);
-CREATE INDEX IF NOT EXISTS idx_form_sw_status_date ON form.sampling_worksheet (status, sampling_date);
-CREATE INDEX IF NOT EXISTS idx_form_ws_status_date ON form.water_sampling (status, sampling_date);
-CREATE INDEX IF NOT EXISTS idx_form_insp_status_date ON form.station_inspection (status, inspection_date);
-CREATE INDEX IF NOT EXISTS idx_form_monsurv_status_date ON form.monitoring_survey (status, survey_date);
-CREATE INDEX IF NOT EXISTS idx_form_dailyact_date ON form.daily_activities (activitie_date);
+-- Finance
+CREATE INDEX IF NOT EXISTS idx_finance_invoice_buyer ON finance.invoice (buyer_partner_id);
+CREATE INDEX IF NOT EXISTS idx_finance_invoice_status ON finance.invoice (status);
+CREATE INDEX IF NOT EXISTS idx_finance_payment_invoice ON finance.payment (invoice_number);
+CREATE INDEX IF NOT EXISTS idx_finance_exchange_rate ON finance.exchange_rate (currency_from, currency_to, rate_date);
 
--- E. CHECK CONSTRAINTS
-DO $$
-BEGIN
-    ALTER TABLE vessel.maintenance ADD CONSTRAINT chk_mt_status CHECK (status IN ('SCHEDULED','IN PROGRESS','COMPLETED','CANCELLED'));
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
+-- Documents
+CREATE INDEX IF NOT EXISTS idx_document_relation_entity ON documents.document_relation (entity_type, entity_id);
 
-DO $$
-BEGIN
-    ALTER TABLE vessel.crew_history ADD CONSTRAINT chk_crew_status CHECK (status IN ('ON_BOARD','SIGNED_OFF'));
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
+-- Audit
+CREATE INDEX IF NOT EXISTS idx_audit_event_time ON audit.audit_event (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_event_table ON audit.audit_event (schema_name, table_name);
+CREATE INDEX IF NOT EXISTS idx_audit_event_user ON audit.audit_event (code_user);
 
--- F. GEOGRAPHIC COORDINATE VALIDATION
+-- Integration
+CREATE INDEX IF NOT EXISTS idx_inbox_status ON integration.inbox (status, received_at);
+CREATE INDEX IF NOT EXISTS idx_outbox_status ON integration.outbox (status, created_at);
+
+-- =============================================================================
+-- 23. COORDINATE VALIDATION CONSTRAINTS
+-- =============================================================================
 DO $$
 DECLARE
-    v_targets text[][] := ARRAY[
-        ARRAY['site.info', 'chk_site_info_coords'],
-        ARRAY['buyer.discharge_location', 'chk_discharge_location_coords'],
-        ARRAY['vessel.movement_log', 'chk_movement_log_coords'],
-        ARRAY['enviro.station_info', 'chk_station_info_coords'],
-        ARRAY['form.sampling_worksheet_detail', 'chk_sw_detail_coords'],
-        ARRAY['form.daily_activities_details', 'chk_dailyact_detail_coords'],
-        ARRAY['form.monitoring_survey_details', 'chk_monsurv_detail_coords'],
-        ARRAY['enviro.water_quality', 'chk_water_quality_coords'],
-        ARRAY['enviro.water_sampling_draft', 'chk_water_sampling_draft_coords']
+    v_checks TEXT[][] := ARRAY[
+        ARRAY['core.partner_address', 'chk_partner_addr_coords'],
+        ARRAY['port.port', 'chk_port_coords'],
+        ARRAY['operations.site', 'chk_site_coords'],
+        ARRAY['environment.station', 'chk_env_station_coords'],
+        ARRAY['tracking.ais_position', 'chk_ais_coords']
     ];
-    v_row text[];
+    v_row TEXT[];
 BEGIN
-    FOREACH v_row SLICE 1 IN ARRAY v_targets LOOP
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = v_row[2]
-        ) THEN
+    FOREACH v_row SLICE 1 IN ARRAY v_checks LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = v_row[2]) THEN
             EXECUTE format(
                 'ALTER TABLE %s ADD CONSTRAINT %I CHECK (
                     (latitude IS NULL OR latitude BETWEEN -90 AND 90)
@@ -1490,120 +1612,23 @@ BEGIN
     END LOOP;
 END $$;
 
--- G. BASIC DATA-QUALITY CONSTRAINTS
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_station_battery_level') THEN
-        ALTER TABLE enviro.station_info ADD CONSTRAINT chk_station_battery_level
-            CHECK (battery_level IS NULL OR battery_level BETWEEN 0 AND 100);
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_station_reading_nonneg') THEN
-        ALTER TABLE enviro.station_reading ADD CONSTRAINT chk_station_reading_nonneg
-            CHECK (
-                (salinity IS NULL OR salinity >= 0) AND
-                (turbidity IS NULL OR turbidity >= 0) AND
-                (current_speed IS NULL OR current_speed >= 0) AND
-                (dissolved_oxygen IS NULL OR dissolved_oxygen >= 0) AND
-                (water_density IS NULL OR water_density >= 0)
-            );
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_weather_log_nonneg') THEN
-        ALTER TABLE enviro.weather_log ADD CONSTRAINT chk_weather_log_nonneg
-            CHECK (
-                (wind_speed IS NULL OR wind_speed >= 0) AND
-                (wave_height IS NULL OR wave_height >= 0)
-            );
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_water_quality_nonneg') THEN
-        ALTER TABLE enviro.water_quality ADD CONSTRAINT chk_water_quality_nonneg
-            CHECK (turbidity >= 0 AND dissolved_oxygen >= 0 AND depth >= 0);
-    END IF;
-
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_daily_production_nonneg') THEN
-        ALTER TABLE operational.daily_production ADD CONSTRAINT chk_daily_production_nonneg
-            CHECK (volume_mined >= 0 AND operating_hours >= 0);
-    END IF;
-END $$;
-
--- H. SEED DATA
-INSERT INTO param.uom (code_uom, name, description)
-VALUES ('M3', 'Cubic Meter', 'Volume dalam meter kubik')
-ON CONFLICT (code_uom) DO NOTHING;
-
--- Cabut hak akses dari pihak luar
-REVOKE EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() FROM anon;
-REVOKE EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() FROM authenticated;
-
--- Berikan kunci eksekusi kepada mesin Supabase
-GRANT EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() TO postgres, service_role;
-GRANT SELECT ON operational.v_production_chart TO anon, authenticated, service_role;
-GRANT SELECT ON operational.v_stock_balance TO anon, authenticated, service_role;
+-- =============================================================================
+-- 24. AUDIT IMMUTABILITY
+-- =============================================================================
+-- Audit tables are append-only. No updates or deletes allowed.
+REVOKE UPDATE, DELETE ON audit.audit_event, audit.audit_change FROM PUBLIC;
+REVOKE UPDATE, DELETE ON audit.audit_event, audit.audit_change FROM app_service;
 
 -- =============================================================================
--- ROLES, PRIVILEGE SEPARATION & AUDIT IMMUTABILITY
+-- 25. ROW LEVEL SECURITY (RLS)
 -- =============================================================================
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_admin') THEN
-        CREATE ROLE app_admin NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_service') THEN
-        CREATE ROLE app_service NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_readonly') THEN
-        CREATE ROLE app_readonly NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'audit_reader') THEN
-        CREATE ROLE audit_reader NOLOGIN;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'reporting_reader') THEN
-        CREATE ROLE reporting_reader NOLOGIN;
-    END IF;
-END $$;
-
--- Privilege separation
-GRANT USAGE ON SCHEMA usr, site, vessel, partner, buyer, operational, enviro,
-                      finance, document, form, param, ref, integration
-    TO app_service;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA
-    usr, site, vessel, partner, buyer, operational, enviro, finance,
-    document, form, param, ref, integration
-    TO app_service;
-
--- app_readonly / reporting_reader
-GRANT USAGE ON SCHEMA usr, site, vessel, partner, buyer, operational, enviro,
-                      finance, document, form, param, ref, reporting
-    TO app_readonly, reporting_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA
-    usr, site, vessel, partner, buyer, operational, enviro, finance,
-    document, form, param, ref, reporting
-    TO app_readonly, reporting_reader;
-
--- audit_reader
-GRANT USAGE ON SCHEMA audit TO audit_reader;
-GRANT SELECT ON ALL TABLES IN SCHEMA audit TO audit_reader;
-
--- app_admin
-GRANT app_service TO app_admin;
-GRANT EXECUTE ON FUNCTION internal.automasi_partisi_bulanan() TO app_admin;
-
--- AUDIT IMMUTABILITY: audit tables are append-only
-REVOKE UPDATE, DELETE ON audit.activity_log, audit.error_log, audit.login_history
-    FROM app_service, app_readonly, audit_reader, reporting_reader, anon, authenticated;
-
--- -----------------------------------------------------------------------------
--- ROW LEVEL SECURITY
--- -----------------------------------------------------------------------------
 ALTER TABLE finance.invoice ENABLE ROW LEVEL SECURITY;
 ALTER TABLE finance.payment ENABLE ROW LEVEL SECURITY;
-ALTER TABLE buyer.info ENABLE ROW LEVEL SECURITY;
-ALTER TABLE usr.info ENABLE ROW LEVEL SECURITY;
-ALTER TABLE document.file_registry ENABLE ROW LEVEL SECURITY;
+ALTER TABLE core.partner ENABLE ROW LEVEL SECURITY;
+ALTER TABLE security.user_account ENABLE ROW LEVEL SECURITY;
+ALTER TABLE documents.document ENABLE ROW LEVEL SECURITY;
 
+-- Note: Implement granular RLS policies per application role as needed.
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='finance' AND tablename='invoice' AND policyname='invoice_read_authenticated') THEN
@@ -1614,32 +1639,112 @@ BEGIN
         CREATE POLICY payment_read_authenticated ON finance.payment
             FOR SELECT TO authenticated USING (true);
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='buyer' AND tablename='info' AND policyname='buyer_info_read_authenticated') THEN
-        CREATE POLICY buyer_info_read_authenticated ON buyer.info
-            FOR SELECT TO authenticated USING (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='usr' AND tablename='info' AND policyname='usr_info_self_read') THEN
-        CREATE POLICY usr_info_self_read ON usr.info
-            FOR SELECT TO authenticated USING (true);
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='document' AND tablename='file_registry' AND policyname='file_registry_read_nonconfidential') THEN
-        CREATE POLICY file_registry_read_nonconfidential ON document.file_registry
-            FOR SELECT TO authenticated USING (is_confidential = false);
-    END IF;
 END $$;
 
--- -----------------------------------------------------------------------------
--- CRON JOB
--- -----------------------------------------------------------------------------
+-- =============================================================================
+-- 26. CRON JOB — Monthly Partition Maintenance
+-- =============================================================================
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'otomasi_partisi_bulanan') THEN
-        PERFORM cron.unschedule(jobid) FROM cron.job WHERE jobname = 'otomasi_partisi_bulanan';
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'create_monthly_partitions') THEN
+        PERFORM cron.unschedule(jobid) FROM cron.job WHERE jobname = 'create_monthly_partitions';
     END IF;
 END $$;
 
 SELECT cron.schedule(
-    'otomasi_partisi_bulanan',
+    'create_monthly_partitions',
     '0 0 25 * *',
-    $$ SELECT internal.automasi_partisi_bulanan(); $$
+    $$ SELECT internal.create_monthly_partitions(); $$
 );
+
+-- =============================================================================
+-- 27. VIEWS — Reporting Layer
+-- =============================================================================
+
+-- Voyage summary
+CREATE OR REPLACE VIEW reporting.voyage_summary AS
+SELECT
+    v.voyage_id,
+    v.voyage_number,
+    v.vessel_id,
+    fv.name AS vessel_name,
+    fv.imo_number,
+    s.shipment_id,
+    v.status,
+    v.planned_departure,
+    v.actual_departure,
+    v.planned_arrival,
+    v.actual_arrival,
+    (SELECT COUNT(*) FROM voyage.port_call pc WHERE pc.voyage_id = v.voyage_id) AS port_call_count,
+    v.created_at
+FROM voyage.voyage v
+LEFT JOIN fleet.vessel fv ON v.vessel_id = fv.vessel_id
+LEFT JOIN logistics.shipment s ON v.shipment_id = s.shipment_id;
+
+-- Cargo summary per voyage
+CREATE OR REPLACE VIEW reporting.cargo_summary AS
+SELECT
+    vc.voyage_id,
+    v.voyage_number,
+    vc.cargo_id,
+    c.cargo_type,
+    c.commodity,
+    vc.loaded_quantity,
+    vc.discharged_quantity,
+    vc.uom_code,
+    (vc.loaded_quantity - vc.discharged_quantity) AS quantity_difference
+FROM cargo.voyage_cargo vc
+JOIN voyage.voyage v ON vc.voyage_id = v.voyage_id
+JOIN cargo.cargo c ON vc.cargo_id = c.cargo_id;
+
+-- Quantity reconciliation (initial vs final)
+CREATE OR REPLACE VIEW reporting.quantity_reconciliation AS
+SELECT
+    qm.cargo_id,
+    c.cargo_type,
+    qm.measurement_type,
+    qm.quantity,
+    qm.uom_code,
+    qm.moisture_pct,
+    qm.net_quantity,
+    qm.measured_at,
+    qm.measured_by_partner,
+    qm.source
+FROM cargo.quantity_measurement qm
+JOIN cargo.cargo c ON qm.cargo_id = c.cargo_id
+ORDER BY qm.cargo_id, qm.measured_at;
+
+-- Sales summary (reporting layer, not source of truth)
+CREATE OR REPLACE VIEW reporting.sales_summary AS
+SELECT
+    i.invoice_number,
+    i.invoice_type,
+    i.buyer_partner_id,
+    cp.name AS buyer_name,
+    i.issue_date,
+    i.due_date,
+    i.currency_code,
+    i.subtotal,
+    i.tax_total,
+    i.total_amount,
+    i.total_amount_idr,
+    i.status,
+    COALESCE(p.paid_amount, 0) AS paid_amount,
+    (i.total_amount - COALESCE(p.paid_amount, 0)) AS outstanding_amount,
+    i.created_at
+FROM finance.invoice i
+LEFT JOIN core.partner cp ON i.buyer_partner_id = cp.partner_id
+LEFT JOIN (
+    SELECT invoice_number, SUM(amount) AS paid_amount
+    FROM finance.payment
+    WHERE status IN ('CONFIRMED','COMPLETED')
+    GROUP BY invoice_number
+) p ON i.invoice_number = p.invoice_number;
+
+-- =============================================================================
+-- 28. DATA LINEAGE & CLASSIFICATION
+-- =============================================================================
+
+COMMENT ON COLUMN integration.inbox.source_system IS 'Source system name — for data lineage tracking';
+COMMENT ON COLUMN integration.inbox.source_record_id IS 'Record ID in the source system';
+COMMENT ON COLUMN integration.inbox.source_country IS 'Country of origin (ISO 3166-1 alpha-2)';
