@@ -607,6 +607,8 @@ CREATE TABLE commercial.delivery_order (
                             REFERENCES commercial.purchase_order(po_num) ON DELETE RESTRICT,
     discharge_site      VARCHAR(30)
                             REFERENCES site.info(site_code) ON DELETE SET NULL,
+    uom_code            VARCHAR(20)     NOT NULL
+                            REFERENCES param.unit_of_measure(uom_code) ON DELETE RESTRICT,
     target_volume       NUMERIC(18,4)   CHECK (target_volume >= 0),
     target_start_date   DATE,
     target_end_date     DATE,
@@ -687,7 +689,6 @@ CREATE TABLE operational.work_activity (
 
 CREATE TABLE operational.dredging_records (
     id               BIGSERIAL      PRIMARY KEY,
-    form_no          VARCHAR(30)    NOT NULL,   
     si_num           VARCHAR(30)    NOT NULL
                             REFERENCES operational.shipment_instruction(si_num) ON DELETE RESTRICT,
     activity_num     BIGINT         NOT NULL
