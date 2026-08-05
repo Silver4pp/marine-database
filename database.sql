@@ -103,10 +103,9 @@ CREATE TABLE param.threshold (
     uom_code        VARCHAR(20)     NOT NULL
                         REFERENCES param.unit_of_measure(uom_code) ON DELETE RESTRICT,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
-    CONSTRAINT uq_threshold_param UNIQUE (parameter_name, threshold_code)
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
+
 
 -- ============================================================
 -- SCHEMA: site
@@ -143,6 +142,7 @@ CREATE TABLE site.info (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
+
 -- ============================================================
 -- SCHEMA: "user"
 -- ============================================================
@@ -171,6 +171,7 @@ CREATE TABLE "user".detail (
     CONSTRAINT uq_user_contact UNIQUE (user_code, contact_type, contact_value)
 );
 
+
 -- ============================================================
 -- SCHEMA: partner
 -- ============================================================
@@ -195,6 +196,7 @@ CREATE TABLE partner.info (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
+
 
 -- ============================================================
 -- SCHEMA: buyer
@@ -245,10 +247,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_prevent_ledger_update
+CREATE OR REPLACE TRIGGER trg_prevent_ledger_update
 BEFORE UPDATE OR DELETE ON buyer.ledger_hist
-FOR EACH ROW
-EXECUTE FUNCTION buyer.fn_prevent_ledger_update();
+FOR EACH ROW EXECUTE FUNCTION buyer.fn_prevent_ledger_update();
 
 CREATE OR REPLACE VIEW buyer.v_info_with_ledger AS
 SELECT
@@ -265,6 +266,7 @@ LEFT JOIN (
     FROM buyer.ledger_hist
     GROUP BY buyer_code
 ) agg ON agg.buyer_code = bi.buyer_code;
+
 
 -- ============================================================
 -- SCHEMA: fleet
@@ -358,6 +360,7 @@ LEFT JOIN LATERAL (
     LIMIT  1
 ) lm ON TRUE;
 
+
 -- ============================================================
 -- SCHEMA: form
 -- ============================================================
@@ -366,47 +369,44 @@ CREATE SCHEMA IF NOT EXISTS form;
 CREATE TABLE form.water_sampling (
     form_no         VARCHAR(30)     PRIMARY KEY,
     sampling_date   DATE            NOT NULL,
-    total_sample    INT             NOT NULL DEFAULT 0
-                        CHECK (total_sample >= 0),
-    recorder_by     VARCHAR(30)
-                        REFERENCES "user".info(user_code) ON DELETE SET NULL,
-    received_by     VARCHAR(30)
-                        REFERENCES "user".info(user_code) ON DELETE SET NULL,
-    status          VARCHAR(30)
-                        REFERENCES param.status(status_code) ON DELETE SET NULL,
+    total_sample    INT             NOT NULL DEFAULT 0 CHECK (total_sample >= 0),
+    recorder_by     VARCHAR(30)     REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    received_by     VARCHAR(30)     REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    status          VARCHAR(30)     REFERENCES param.status(status_code) ON DELETE SET NULL,
+    location_desc   TEXT,           
+    weather         VARCHAR(50),    
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 CREATE TABLE form.sample (
     sample_id       BIGSERIAL       PRIMARY KEY,
-    form_no         VARCHAR(30)     NOT NULL
-                        REFERENCES form.water_sampling(form_no) ON DELETE CASCADE,
+    form_no         VARCHAR(30)     NOT NULL,
     sample_no       INT             NOT NULL,
     type_sample     VARCHAR(50)     NOT NULL,
     description     TEXT,
-    status          VARCHAR(30)
-                        REFERENCES param.status(status_code) ON DELETE SET NULL,
+    status          VARCHAR(30)     REFERENCES param.status(status_code) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
+    
     CONSTRAINT uq_sample_per_form UNIQUE (form_no, sample_no)
 );
 
 CREATE TABLE form.measurement (
     id              BIGSERIAL       PRIMARY KEY,
-    sample_id       BIGINT          NOT NULL
-                        REFERENCES form.sample(sample_id) ON DELETE CASCADE,
+    form_no         VARCHAR(30)     NOT NULL, 
+    sample_id       BIGINT          NOT NULL, 
     parameter_name  VARCHAR(100)    NOT NULL,
     parameter_value NUMERIC(18,6),
-    uom_code        VARCHAR(20)
-                        REFERENCES param.unit_of_measure(uom_code) ON DELETE SET NULL,
+    uom_code        VARCHAR(20)     REFERENCES param.unit_of_measure(uom_code) ON DELETE SET NULL,
     method          VARCHAR(100),
-    status          VARCHAR(30)
-                        REFERENCES param.status(status_code) ON DELETE SET NULL,
+    status          VARCHAR(30)     REFERENCES param.status(status_code) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+
+    CONSTRAINT uq_form_measurement UNIQUE (form_no, sample_id, parameter_name)
 );
+
 
 -- ============================================================
 -- SCHEMA: laboratory
@@ -432,6 +432,7 @@ CREATE TABLE laboratory.result (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
+
 
 -- ============================================================
 -- SCHEMA: survey
@@ -464,6 +465,7 @@ CREATE TABLE survey.measurement (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
+
 
 -- ============================================================
 -- SCHEMA: enviro
@@ -559,6 +561,7 @@ LEFT JOIN LATERAL (
     LIMIT  1
 ) lm ON TRUE;
 
+
 -- ============================================================
 -- SCHEMA: commercial
 -- ============================================================
@@ -618,6 +621,7 @@ CREATE TABLE commercial.delivery_order (
     CHECK (actual_end_date >= actual_start_date)
 );
 
+
 -- ============================================================
 -- SCHEMA: operational
 -- ============================================================
@@ -658,7 +662,7 @@ CREATE TABLE operational.shipment_instruction (
 );
 
 CREATE TABLE operational.work_activity (
-    id              BIGSERIAL       PRIMARY KEY,
+    activity_num    BIGSERIAL       PRIMARY KEY,
     si_num          VARCHAR(30)     NOT NULL
                         REFERENCES operational.shipment_instruction(si_num) ON DELETE CASCADE,
     fleet_code      VARCHAR(30)     NOT NULL
@@ -676,8 +680,98 @@ CREATE TABLE operational.work_activity (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CHECK (planned_end >= planned_start),
-    CHECK (actual_end  >= actual_start)
+    CHECK (actual_end  >= actual_start),
+
+    CONSTRAINT uq_activity_si UNIQUE (si_num, activity_num)
 );
+
+CREATE TABLE operational.dredging_records (
+    id               BIGSERIAL      PRIMARY KEY,
+    form_no          VARCHAR(30)    NOT NULL,   
+    si_num           VARCHAR(30)    NOT NULL
+                            REFERENCES operational.shipment_instruction(si_num) ON DELETE RESTRICT,
+    activity_num     BIGINT         NOT NULL
+                            REFERENCES operational.work_activity(activity_num) ON DELETE RESTRICT,
+    record_date      DATE           NOT NULL,
+    dredging_volume  NUMERIC(18,4)  NOT NULL CHECK (dredging_volume >= 0),
+    uom_code         VARCHAR(20)    NOT NULL DEFAULT 'M3'
+                            REFERENCES param.unit_of_measure(uom_code) ON DELETE RESTRICT,
+    created_by       VARCHAR(30)
+                            REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    notes            TEXT,
+    created_at       TIMESTAMPTZ    NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ    NOT NULL DEFAULT now(),
+
+    CONSTRAINT fk_dredging_activity
+        FOREIGN KEY (si_num, activity_num)
+        REFERENCES operational.work_activity(si_num, activity_num)
+        ON DELETE CASCADE,
+
+    CONSTRAINT uq_dredging_daily UNIQUE (activity_num, record_date)
+);
+
+CREATE OR REPLACE FUNCTION operational.fn_validate_dredging_volume()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_do_num      VARCHAR(30);
+    v_target      NUMERIC(18,4);
+    v_target_uom  VARCHAR(20);
+    v_total       NUMERIC(18,4);
+BEGIN
+    SELECT
+        si.do_num,
+        d_o.target_volume,
+        po.uom_code
+    INTO
+        v_do_num,
+        v_target,
+        v_target_uom
+    FROM operational.shipment_instruction si
+    JOIN commercial.delivery_order d_o
+      ON d_o.do_num = si.do_num
+    JOIN commercial.purchase_order po
+      ON po.po_num = d_o.po_num
+    WHERE si.si_num = NEW.si_num;
+
+    IF v_do_num IS NULL THEN
+        RAISE EXCEPTION 'Shipment instruction % not found', NEW.si_num;
+    END IF;
+
+    IF v_target IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    IF NEW.uom_code <> v_target_uom THEN
+        RAISE EXCEPTION
+            'Dredging UOM (%) must match PO UOM (%) for DO %',
+            NEW.uom_code, v_target_uom, v_do_num;
+    END IF;
+
+    SELECT COALESCE(SUM(dr.dredging_volume), 0)
+    INTO v_total
+    FROM operational.dredging_records dr
+    JOIN operational.shipment_instruction si2
+      ON si2.si_num = dr.si_num
+    WHERE si2.do_num = v_do_num
+      AND dr.id IS DISTINCT FROM NEW.id;
+
+    IF (v_total + NEW.dredging_volume) > v_target THEN
+        RAISE EXCEPTION
+            'Total dredging volume (%) exceeds DO target volume (%) for DO %',
+            v_total + NEW.dredging_volume,
+            v_target,
+            v_do_num;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE TRIGGER trg_validate_dredging_volume
+BEFORE INSERT OR UPDATE OF dredging_volume, uom_code
+ON operational.dredging_records
+FOR EACH ROW
+EXECUTE FUNCTION operational.fn_validate_dredging_volume();
 
 -- ============================================================
 -- SCHEMA: voyage
@@ -728,7 +822,6 @@ CREATE TABLE voyage.voyage_hist (
 
 -- ============================================================
 -- GLOBAL AUTO updated_at TRIGGER
--- VERSI FIX: hanya untuk BASE TABLE (bukan view / matview)
 -- ============================================================
 DO $$
 DECLARE
@@ -748,7 +841,6 @@ BEGIN
           AND n.nspname NOT IN ('pg_catalog','information_schema','reporting')
           AND n.nspname NOT LIKE 'pg_%'
     LOOP
-        -- Cek apakah trigger sudah ada (idempotent)
         SELECT EXISTS (
             SELECT 1
             FROM information_schema.triggers
@@ -785,10 +877,7 @@ $$;
 -- INDEXING
 -- ============================================================
 
--- ============================================================
 -- 1. PARAM INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_status_group
     ON param.status(status_group);
 
@@ -801,11 +890,7 @@ CREATE INDEX IF NOT EXISTS idx_threshold_uom_code
 CREATE INDEX IF NOT EXISTS idx_threshold_parameter_name
     ON param.threshold(parameter_name);
 
-
--- ============================================================
 -- 2. SITE INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_site_info_type
     ON site.info(type_code);
 
@@ -817,11 +902,7 @@ CREATE INDEX IF NOT EXISTS idx_site_info_city
     ON site.info(city)
     WHERE city IS NOT NULL;
 
-
--- ============================================================
 -- 3. USER INDEXES
--- ============================================================
-
 CREATE UNIQUE INDEX IF NOT EXISTS uq_user_one_primary
     ON "user".detail(user_code)
     WHERE is_primary = TRUE
@@ -833,11 +914,7 @@ CREATE INDEX IF NOT EXISTS idx_user_detail_contact_type
 CREATE INDEX IF NOT EXISTS idx_user_info_role
     ON "user".info(role);
 
-
--- ============================================================
 -- 4. PARTNER INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_partner_info_type
     ON partner.info(type_code);
 
@@ -845,11 +922,7 @@ CREATE INDEX IF NOT EXISTS idx_partner_info_site
     ON partner.info(site_code)
     WHERE site_code IS NOT NULL;
 
-
--- ============================================================
 -- 5. BUYER INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_buyer_info_site
     ON buyer.info(site_code)
     WHERE site_code IS NOT NULL;
@@ -871,10 +944,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_ref_doc
     ON buyer.ledger_hist (buyer_code, ref_doc)
     WHERE ref_doc IS NOT NULL;
 
--- ============================================================
 -- 6. FLEET INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_fleet_info_partner
     ON fleet.info(partner_code);
 
@@ -906,50 +976,18 @@ CREATE INDEX IF NOT EXISTS idx_fleet_assignment_all
 CREATE INDEX IF NOT EXISTS idx_fleet_mtc_fleet_start_id
     ON fleet.maintenance(fleet_code, start_date DESC, id DESC);
 
--- ============================================================
+
 -- 7. FORM INDEXES
--- ============================================================
+CREATE INDEX IF NOT EXISTS idx_form_sample_form_no
+    ON form.sample(form_no);
 
-CREATE INDEX IF NOT EXISTS idx_form_water_sampling_sampling_date
-    ON form.water_sampling(sampling_date DESC);
+CREATE INDEX IF NOT EXISTS idx_form_measurement_form_no
+    ON form.measurement(form_no);
 
-CREATE INDEX IF NOT EXISTS idx_form_water_sampling_recorder
-    ON form.water_sampling(recorder_by)
-    WHERE recorder_by IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_form_water_sampling_received
-    ON form.water_sampling(received_by)
-    WHERE received_by IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_form_water_sampling_status
-    ON form.water_sampling(status)
-    WHERE status IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_form_sample_status
-    ON form.sample(status)
-    WHERE status IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_form_sample_type
-    ON form.sample(type_sample);
-
-CREATE INDEX IF NOT EXISTS idx_form_measurement_sample
+CREATE INDEX IF NOT EXISTS idx_form_measurement_sample_id
     ON form.measurement(sample_id);
 
-CREATE INDEX IF NOT EXISTS idx_form_measurement_uom
-    ON form.measurement(uom_code)
-    WHERE uom_code IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_form_measurement_status
-    ON form.measurement(status)
-    WHERE status IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS idx_form_measurement_parameter
-    ON form.measurement(parameter_name);
-
--- ============================================================
 -- 8. SURVEY INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_survey_water_sampling_sampling_date
     ON survey.water_sampling(sampling_date DESC);
 
@@ -975,11 +1013,7 @@ CREATE INDEX IF NOT EXISTS idx_survey_measurement_uom
 CREATE INDEX IF NOT EXISTS idx_survey_measurement_parameter
     ON survey.measurement(parameter_name);
 
-
--- ============================================================
 -- 9. ENVIRO INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_enviro_station_site
     ON enviro.station(site_code)
     WHERE site_code IS NOT NULL;
@@ -1003,11 +1037,7 @@ CREATE INDEX IF NOT EXISTS brin_buoy_reading_record_time
 CREATE INDEX IF NOT EXISTS idx_enviro_mtc_station_start_id
     ON enviro.maintenance(station_code, start_date DESC, id DESC);
 
-
--- ============================================================
 -- 10. COMMERCIAL INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_po_buyer_date
     ON commercial.purchase_order(buyer_code, po_date DESC);
 
@@ -1046,11 +1076,7 @@ CREATE INDEX IF NOT EXISTS idx_do_discharge_site
 CREATE INDEX IF NOT EXISTS idx_do_target_date
     ON commercial.delivery_order(target_start_date, target_end_date);
 
-
--- ============================================================
 -- 11. OPERATIONAL INDEXES
--- ============================================================
-
 CREATE INDEX IF NOT EXISTS idx_work_area_geom
     ON operational.work_area USING GIST(geom)
     WHERE geom IS NOT NULL;
@@ -1094,10 +1120,23 @@ CREATE INDEX IF NOT EXISTS idx_si_status
     ON operational.shipment_instruction(status)
     WHERE status IS NOT NULL;
 
--- ============================================================
--- 12. VOYAGE INDEXES
--- ============================================================
+CREATE INDEX IF NOT EXISTS idx_dredging_si_activity
+    ON operational.dredging_records(si_num, activity_num);
 
+CREATE INDEX IF NOT EXISTS idx_dredging_record_date
+    ON operational.dredging_records(record_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_dredging_form_no
+    ON operational.dredging_records(form_no);
+
+CREATE INDEX IF NOT EXISTS idx_dredging_uom
+    ON operational.dredging_records(uom_code);
+
+CREATE INDEX IF NOT EXISTS idx_dredging_created_by
+    ON operational.dredging_records(created_by)
+    WHERE created_by IS NOT NULL;
+
+-- 12. VOYAGE INDEXES
 CREATE INDEX IF NOT EXISTS idx_voyage_fleet_time_id
     ON voyage.voyage(fleet_code, record_time DESC, id DESC);
 
@@ -1122,3 +1161,16 @@ CREATE INDEX IF NOT EXISTS idx_voyage_hist_geom
 
 CREATE INDEX IF NOT EXISTS brin_voyage_hist_record_time
     ON voyage.voyage_hist USING BRIN(record_time);
+
+-- 13. LABORATORY INDEXES
+CREATE INDEX IF NOT EXISTS idx_lab_result_lab
+    ON laboratory.result(lab_code) WHERE lab_code IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_lab_result_sample
+    ON laboratory.result(sample_id) WHERE sample_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_lab_result_doc_no
+    ON laboratory.result(doc_no);
+
+CREATE INDEX IF NOT EXISTS idx_lab_info_site
+    ON laboratory.info(site_code) WHERE site_code IS NOT NULL;
