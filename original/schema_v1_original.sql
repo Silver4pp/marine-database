@@ -901,8 +901,8 @@ CREATE TABLE operational.shipment_instruction (
                             REFERENCES param.status(status_code) ON DELETE SET NULL,
     planned_start       TIMESTAMPTZ,
     planned_end         TIMESTAMPTZ,
-    actual_start       TIMESTAMPTZ,
-    actual_end         TIMESTAMPTZ,
+    actual_start        TIMESTAMPTZ,
+    actual_end          TIMESTAMPTZ,
     notes               TEXT,
     created_by          VARCHAR(30)
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
