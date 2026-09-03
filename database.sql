@@ -1,18 +1,21 @@
 -- ============================================================
--- DATABASE SCHEMA - COMPLETE & CORRECTED
+-- DATABASE SCHEMA - COMPLETE & PRODUCTION READY
+-- Single File - Organized Structure
 -- Last Updated: 2026-09-03
 -- ============================================================
 
 -- ============================================================
--- EXTENSIONS
+-- SECTION 1: EXTENSIONS
 -- ============================================================
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 -- ============================================================
--- GLOBAL TRIGGER FUNCTION: auto-update updated_at
+-- SECTION 2: GLOBAL FUNCTIONS
 -- ============================================================
+
+-- Auto-update updated_at trigger function
 CREATE OR REPLACE FUNCTION public.fn_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -22,11 +25,34 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ============================================================
--- SCHEMA: param (Parameters/Reference Data)
+-- SECTION 3: SCHEMA CREATION
 -- ============================================================
 CREATE SCHEMA IF NOT EXISTS param;
+CREATE SCHEMA IF NOT EXISTS site;
+CREATE SCHEMA IF NOT EXISTS "user";
+CREATE SCHEMA IF NOT EXISTS partner;
+CREATE SCHEMA IF NOT EXISTS buyer;
+CREATE SCHEMA IF NOT EXISTS fleet;
+CREATE SCHEMA IF NOT EXISTS form;
+CREATE SCHEMA IF NOT EXISTS laboratory;
+CREATE SCHEMA IF NOT EXISTS survey;
+CREATE SCHEMA IF NOT EXISTS enviro;
+CREATE SCHEMA IF NOT EXISTS commercial;
+CREATE SCHEMA IF NOT EXISTS operational;
+CREATE SCHEMA IF NOT EXISTS voyage;
+CREATE SCHEMA IF NOT EXISTS financial;
+CREATE SCHEMA IF NOT EXISTS hse;
+CREATE SCHEMA IF NOT EXISTS reporting;
+CREATE SCHEMA IF NOT EXISTS security;
+CREATE SCHEMA IF NOT EXISTS audit;
+CREATE SCHEMA IF NOT EXISTS workflow;
+CREATE SCHEMA IF NOT EXISTS document;
+CREATE SCHEMA IF NOT EXISTS telemetry;
 
--- Country Reference
+-- ============================================================
+-- SECTION 4: PARAM SCHEMA TABLES
+-- ============================================================
+
 CREATE TABLE param.country (
     country_id      BIGSERIAL       PRIMARY KEY,
     iso_alpha2      CHAR(2)         NOT NULL UNIQUE,
@@ -39,18 +65,16 @@ CREATE TABLE param.country (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Currency Reference
 CREATE TABLE param.currency (
     currency_code   CHAR(3)         PRIMARY KEY,
     name            VARCHAR(100)    NOT NULL,
     symbol          VARCHAR(10),
-    decimal_places  SMALLINT        NOT NULL DEFAULT 2 CHECK (decimal_places >= 0),
+    decimal_places  SMALLINT        NOT NULL DEFAULT 2,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Unit of Measure Reference
 CREATE TABLE param.unit_of_measure (
     uom_code        VARCHAR(20)     PRIMARY KEY,
     name            VARCHAR(100)    NOT NULL,
@@ -65,7 +89,6 @@ CREATE TABLE param.unit_of_measure (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Unit Conversion Reference
 CREATE TABLE param.unit_conversion (
     uc_code         VARCHAR(20)     PRIMARY KEY,
     uom_from        VARCHAR(20)     NOT NULL
@@ -76,26 +99,10 @@ CREATE TABLE param.unit_conversion (
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_conversion_pair UNIQUE (uom_from, uom_to),
-    CONSTRAINT chk_diff_uom       CHECK  (uom_from <> uom_to)
+    CONSTRAINT chk_diff_uom CHECK (uom_from <> uom_to)
 );
 
--- Status Reference (Generic status for all modules)
-CREATE TABLE param.status (
-    status_code     VARCHAR(30)     PRIMARY KEY,
-    status_group    VARCHAR(50)     NOT NULL,
-    display_name    VARCHAR(100),
-    description     TEXT,
-    sort_order      SMALLINT        DEFAULT 0,
-    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
-    CONSTRAINT uq_status_group_code UNIQUE (status_group, status_code)
-);
-
--- Status Groups (Lookup untuk konsistensi)
 CREATE TABLE param.status_group (
     group_code      VARCHAR(50)     PRIMARY KEY,
     group_name      VARCHAR(100)    NOT NULL,
@@ -105,7 +112,19 @@ CREATE TABLE param.status_group (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Threshold/Parameter Reference
+CREATE TABLE param.status (
+    status_code     VARCHAR(30)     PRIMARY KEY,
+    status_group    VARCHAR(50)     NOT NULL
+                        REFERENCES param.status_group(group_code) ON DELETE RESTRICT,
+    display_name    VARCHAR(100),
+    description     TEXT,
+    sort_order      SMALLINT        DEFAULT 0,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_status_group_code UNIQUE (status_group, status_code)
+);
+
 CREATE TABLE param.threshold (
     threshold_code  VARCHAR(30)     PRIMARY KEY,
     parameter_name  VARCHAR(100)    NOT NULL,
@@ -118,11 +137,9 @@ CREATE TABLE param.threshold (
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_threshold_param UNIQUE (parameter_name, uom_code)
 );
 
--- Role Reference (untuk user management)
 CREATE TABLE param.role (
     role_code       VARCHAR(50)     PRIMARY KEY,
     role_name       VARCHAR(100)    NOT NULL,
@@ -134,11 +151,9 @@ CREATE TABLE param.role (
 );
 
 -- ============================================================
--- SCHEMA: site (Location Data)
+-- SECTION 5: SITE SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS site;
 
--- Site Type
 CREATE TABLE site.type (
     type_code       VARCHAR(20)     PRIMARY KEY,
     type_group      VARCHAR(50)     NOT NULL,
@@ -148,7 +163,6 @@ CREATE TABLE site.type (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Site Information
 CREATE TABLE site.info (
     site_code       VARCHAR(30)     PRIMARY KEY,
     type_code       VARCHAR(20)     NOT NULL
@@ -171,17 +185,16 @@ CREATE TABLE site.info (
                             ELSE NULL
                         END
                     ) STORED,
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 -- ============================================================
--- SCHEMA: "user" (User Management)
+-- SECTION 6: USER SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS "user";
 
--- User Information
 CREATE TABLE "user".info (
     user_code       VARCHAR(30)     PRIMARY KEY,
     name            VARCHAR(150)    NOT NULL,
@@ -189,12 +202,12 @@ CREATE TABLE "user".info (
                         REFERENCES param.role(role_code) ON DELETE RESTRICT,
     employee_id     VARCHAR(30),
     department      VARCHAR(100),
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- User Contact Details
 CREATE TABLE "user".detail (
     id              BIGSERIAL       PRIMARY KEY,
     user_code       VARCHAR(30)     NOT NULL
@@ -203,15 +216,13 @@ CREATE TABLE "user".detail (
                         CHECK (contact_type IN ('PHONE','EMAIL','FAX','ADDRESS','EMERGENCY')),
     contact_value   VARCHAR(200)    NOT NULL,
     is_primary      BOOLEAN         NOT NULL DEFAULT FALSE,
-    is_verified      BOOLEAN         NOT NULL DEFAULT FALSE,
+    is_verified     BOOLEAN         NOT NULL DEFAULT FALSE,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_user_contact UNIQUE (user_code, contact_type, contact_value)
 );
 
--- User Session/Audit Log
 CREATE TABLE "user".session_log (
     id              BIGSERIAL       PRIMARY KEY,
     user_code       VARCHAR(30)     NOT NULL
@@ -225,11 +236,9 @@ CREATE TABLE "user".session_log (
 );
 
 -- ============================================================
--- SCHEMA: partner (Business Partners)
+-- SECTION 7: PARTNER SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS partner;
 
--- Partner Type
 CREATE TABLE partner.type (
     type_code       VARCHAR(20)     PRIMARY KEY,
     type_group      VARCHAR(50)     NOT NULL,
@@ -239,7 +248,6 @@ CREATE TABLE partner.type (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Partner Information
 CREATE TABLE partner.info (
     partner_code    VARCHAR(30)     PRIMARY KEY,
     type_code       VARCHAR(20)     NOT NULL
@@ -258,17 +266,16 @@ CREATE TABLE partner.info (
     contact_person  VARCHAR(150),
     contact_phone   VARCHAR(50),
     contact_email   VARCHAR(100),
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 -- ============================================================
--- SCHEMA: buyer (Buyer/Customer Management)
+-- SECTION 8: BUYER SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS buyer;
 
--- Buyer Information
 CREATE TABLE buyer.info (
     buyer_code      VARCHAR(30)     PRIMARY KEY,
     name            VARCHAR(150)    NOT NULL,
@@ -281,12 +288,12 @@ CREATE TABLE buyer.info (
     contact_phone   VARCHAR(50),
     contact_email   VARCHAR(100),
     address         TEXT,
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Buyer-Site Assignment
 CREATE TABLE buyer.site (
     id              BIGSERIAL       PRIMARY KEY,
     buyer_code      VARCHAR(30)     NOT NULL
@@ -298,11 +305,9 @@ CREATE TABLE buyer.site (
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_buyer_site UNIQUE (buyer_code, site_code)
 );
 
--- Buyer Ledger History (Immutable)
 CREATE TABLE buyer.ledger_hist (
     id              BIGSERIAL       PRIMARY KEY,
     buyer_code      VARCHAR(30)     NOT NULL
@@ -318,87 +323,15 @@ CREATE TABLE buyer.ledger_hist (
     description     TEXT,
     reversal_of_id  BIGINT          REFERENCES buyer.ledger_hist(id) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
+    tenant_id       UUID,
     CONSTRAINT uq_ledger_ref_doc UNIQUE (buyer_code, ref_doc, ref_type)
                         WHERE ref_doc IS NOT NULL
 );
 
--- Function to prevent ledger updates
-CREATE OR REPLACE FUNCTION buyer.fn_prevent_ledger_update()
-RETURNS TRIGGER AS $$
-BEGIN
-    RAISE EXCEPTION 'Ledger entries are immutable. Create a reversal entry instead.';
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER trg_prevent_ledger_update
-BEFORE UPDATE OR DELETE ON buyer.ledger_hist
-FOR EACH ROW EXECUTE FUNCTION buyer.fn_prevent_ledger_update();
-
--- Function to reverse a ledger entry
-CREATE OR REPLACE FUNCTION buyer.fn_reverse_ledger_entry(
-    p_entry_id BIGINT,
-    p_reason TEXT
-) RETURNS BIGINT AS $$
-DECLARE
-    v_new_id BIGINT;
-    v_entry buyer.ledger_hist%ROWTYPE;
-BEGIN
-    -- Get original entry
-    SELECT * INTO v_entry FROM buyer.ledger_hist WHERE id = p_entry_id;
-    
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Ledger entry not found: %', p_entry_id;
-    END IF;
-
-    -- Create reversal entry
-    INSERT INTO buyer.ledger_hist (
-        buyer_code, transaction_date, transaction_type, amount,
-        currency_code, ref_doc, ref_type, description, reversal_of_id
-    ) VALUES (
-        v_entry.buyer_code,
-        CURRENT_DATE,
-        CASE v_entry.transaction_type WHEN 'CREDIT' THEN 'DEBIT' ELSE 'CREDIT' END,
-        v_entry.amount,
-        v_entry.currency_code,
-        v_entry.ref_doc,
-        v_entry.ref_type,
-        'REVERSAL: ' || p_reason,
-        p_entry_id
-    ) RETURNING id INTO v_new_id;
-
-    RETURN v_new_id;
-END;
-$$ LANGUAGE plpgsql;
-
--- View: Buyer with Ledger Balance
-CREATE OR REPLACE VIEW buyer.v_info_with_ledger AS
-SELECT
-    bi.*,
-    c.symbol AS currency_symbol,
-    COALESCE(agg.balance, 0) AS amount_ledger,
-    COALESCE(agg.last_transaction, NULL) AS last_transaction_date
-FROM buyer.info bi
-LEFT JOIN (
-    SELECT
-        buyer_code,
-        currency_code,
-        SUM(CASE
-            WHEN transaction_type = 'CREDIT' THEN  amount
-            WHEN transaction_type = 'DEBIT'  THEN -amount
-        END) AS balance,
-        MAX(transaction_date) AS last_transaction
-    FROM buyer.ledger_hist
-    GROUP BY buyer_code, currency_code
-) agg ON agg.buyer_code = bi.buyer_code
-LEFT JOIN param.currency c ON c.currency_code = agg.currency_code;
-
 -- ============================================================
--- SCHEMA: fleet (Vessels/Equipment)
+-- SECTION 9: FLEET SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS fleet;
 
--- Fleet Type
 CREATE TABLE fleet.type (
     type_code       VARCHAR(20)     PRIMARY KEY,
     type_group      VARCHAR(50)     NOT NULL,
@@ -408,7 +341,6 @@ CREATE TABLE fleet.type (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Fleet Information (Vessels)
 CREATE TABLE fleet.info (
     fleet_code      VARCHAR(30)     PRIMARY KEY,
     partner_code    VARCHAR(30)     NOT NULL
@@ -429,15 +361,14 @@ CREATE TABLE fleet.info (
     year_built      SMALLINT,
     engine_type     VARCHAR(100),
     fuel_type       VARCHAR(50),
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_fleet_imo   UNIQUE (imo_number)   WHERE imo_number IS NOT NULL,
     CONSTRAINT uq_fleet_mmsi  UNIQUE (mmsi_number)  WHERE mmsi_number IS NOT NULL
 );
 
--- Fleet Assignment to Site
 CREATE TABLE fleet.assignment_leg (
     id              BIGSERIAL       PRIMARY KEY,
     fleet_code      VARCHAR(30)     NOT NULL
@@ -452,14 +383,12 @@ CREATE TABLE fleet.assignment_leg (
     notes           TEXT,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_assignment_dates
         CHECK (est_end_date >= est_start_date OR est_end_date IS NULL),
     CONSTRAINT chk_act_dates
         CHECK (act_end_date >= act_start_date OR act_end_date IS NULL)
 );
 
--- Exclusion constraint untuk prevent overlapping assignments
 ALTER TABLE fleet.assignment_leg
 ADD CONSTRAINT chk_no_overlapping_assignment
 EXCLUDE USING GIST (
@@ -470,11 +399,8 @@ EXCLUDE USING GIST (
         '[)'
     ) WITH &&
 )
-WHERE (
-    COALESCE(act_start_date, est_start_date) IS NOT NULL
-);
+WHERE (COALESCE(act_start_date, est_start_date) IS NOT NULL);
 
--- Fleet Maintenance Records
 CREATE TABLE fleet.maintenance (
     id              BIGSERIAL       PRIMARY KEY,
     fleet_code      VARCHAR(30)     NOT NULL
@@ -490,41 +416,13 @@ CREATE TABLE fleet.maintenance (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_mtc_end_date CHECK (end_date >= start_date OR end_date IS NULL)
 );
 
--- View: Fleet with Maintenance Info
-CREATE OR REPLACE VIEW fleet.v_info_with_maintenance AS
-SELECT
-    fi.*,
-    ft.type_group,
-    pc.name AS partner_name,
-    lm.last_mtc_date,
-    lm.last_mtc_type,
-    lm.last_mtc_description,
-    lm.maintenance_count
-FROM fleet.info fi
-LEFT JOIN fleet.type ft ON ft.type_code = fi.type_code
-LEFT JOIN partner.info pc ON pc.partner_code = fi.partner_code
-LEFT JOIN LATERAL (
-    SELECT 
-        fm.start_date AS last_mtc_date,
-        fm.maintenance_type AS last_mtc_type,
-        fm.description AS last_mtc_description,
-        COUNT(*) OVER () AS maintenance_count
-    FROM fleet.maintenance fm
-    WHERE fm.fleet_code = fi.fleet_code
-    ORDER BY fm.start_date DESC
-    LIMIT 1
-) lm ON TRUE;
-
 -- ============================================================
--- SCHEMA: form (Form Management - Sampling Forms)
+-- SECTION 10: FORM SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS form;
 
--- Water Sampling Form Header
 CREATE TABLE form.water_sampling (
     form_no         VARCHAR(30)     PRIMARY KEY,
     form_type       VARCHAR(50)     NOT NULL DEFAULT 'WATER_SAMPLING',
@@ -545,11 +443,11 @@ CREATE TABLE form.water_sampling (
     approved_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
     approved_at     TIMESTAMPTZ,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Sample Detail (Fixed: Add FK to form.water_sampling)
 CREATE TABLE form.sample (
     sample_id       BIGSERIAL       PRIMARY KEY,
     form_no         VARCHAR(30)     NOT NULL
@@ -566,13 +464,12 @@ CREATE TABLE form.sample (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     received_at     TIMESTAMPTZ,
     analyzed_at     TIMESTAMPTZ,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    
     CONSTRAINT uq_sample_per_form UNIQUE (form_no, sample_no)
 );
 
--- Sample Measurement Result
 CREATE TABLE form.measurement (
     id              BIGSERIAL       PRIMARY KEY,
     form_no         VARCHAR(30)     NOT NULL
@@ -591,41 +488,16 @@ CREATE TABLE form.measurement (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     is_exceed       BOOLEAN         DEFAULT FALSE,
     notes           TEXT,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_form_measurement UNIQUE (form_no, sample_id, parameter_name)
 );
 
--- Trigger to auto-update total_sample count
-CREATE OR REPLACE FUNCTION form.fn_update_sample_count()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF TG_OP = 'INSERT' THEN
-        UPDATE form.water_sampling
-        SET total_sample = total_sample + 1
-        WHERE form_no = NEW.form_no;
-        RETURN NEW;
-    ELSIF TG_OP = 'DELETE' THEN
-        UPDATE form.water_sampling
-        SET total_sample = total_sample - 1
-        WHERE form_no = OLD.form_no;
-        RETURN OLD;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER trg_update_sample_count
-AFTER INSERT OR DELETE ON form.sample
-FOR EACH ROW EXECUTE FUNCTION form.fn_update_sample_count();
-
 -- ============================================================
--- SCHEMA: laboratory (Laboratory Management)
+-- SECTION 11: LABORATORY SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS laboratory;
 
--- Laboratory Information
 CREATE TABLE laboratory.info (
     lab_code        VARCHAR(30)     PRIMARY KEY,
     name            VARCHAR(150)    NOT NULL,
@@ -634,12 +506,12 @@ CREATE TABLE laboratory.info (
     address         TEXT,
     accreditation_no VARCHAR(50),
     accreditation_exp DATE,
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Laboratory Equipment
 CREATE TABLE laboratory.equipment (
     equipment_id    VARCHAR(30)     PRIMARY KEY,
     lab_code        VARCHAR(30)     NOT NULL
@@ -647,7 +519,7 @@ CREATE TABLE laboratory.equipment (
     name            VARCHAR(150)    NOT NULL,
     model           VARCHAR(100),
     serial_number   VARCHAR(100),
-    manufacturer     VARCHAR(100),
+    manufacturer    VARCHAR(100),
     calibration_date DATE,
     next_calibration DATE,
     status          VARCHAR(30)
@@ -657,7 +529,6 @@ CREATE TABLE laboratory.equipment (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Test Categories
 CREATE TABLE laboratory.test_category (
     category_code   VARCHAR(30)     PRIMARY KEY,
     category_name   VARCHAR(100)    NOT NULL,
@@ -667,7 +538,6 @@ CREATE TABLE laboratory.test_category (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Test Methods
 CREATE TABLE laboratory.method (
     method_code     VARCHAR(30)     PRIMARY KEY,
     category_code   VARCHAR(30)     NOT NULL
@@ -680,7 +550,6 @@ CREATE TABLE laboratory.method (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Laboratory Result
 CREATE TABLE laboratory.result (
     id              BIGSERIAL       PRIMARY KEY,
     doc_no          VARCHAR(50)     NOT NULL UNIQUE,
@@ -698,11 +567,11 @@ CREATE TABLE laboratory.result (
     status          VARCHAR(30)
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     notes           TEXT,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Laboratory Result Detail
 CREATE TABLE laboratory.result_detail (
     id              BIGSERIAL       PRIMARY KEY,
     result_id       BIGINT          NOT NULL
@@ -718,16 +587,13 @@ CREATE TABLE laboratory.result_detail (
     notes           TEXT,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_result_parameter UNIQUE (result_id, parameter_name)
 );
 
 -- ============================================================
--- SCHEMA: survey (Survey Data - terpisah dari form lab)
+-- SECTION 12: SURVEY SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS survey;
 
--- Survey Type
 CREATE TABLE survey.type (
     type_code       VARCHAR(30)     PRIMARY KEY,
     type_name       VARCHAR(100)    NOT NULL,
@@ -737,7 +603,6 @@ CREATE TABLE survey.type (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Survey Water Sampling Header
 CREATE TABLE survey.water_sampling (
     form_no         VARCHAR(30)     PRIMARY KEY,
     type_code       VARCHAR(30)     NOT NULL
@@ -754,11 +619,11 @@ CREATE TABLE survey.water_sampling (
     location_desc   TEXT,
     status          VARCHAR(30)
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Survey Measurement
 CREATE TABLE survey.measurement (
     id              BIGSERIAL       PRIMARY KEY,
     form_no         VARCHAR(30)     NOT NULL
@@ -775,18 +640,16 @@ CREATE TABLE survey.measurement (
     method          VARCHAR(100),
     is_exceed       BOOLEAN         DEFAULT FALSE,
     notes           TEXT,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_survey_measurement UNIQUE (form_no, measurement_no, parameter_name)
 );
 
 -- ============================================================
--- SCHEMA: enviro (Environmental Monitoring)
+-- SECTION 13: ENVIRO SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS enviro;
 
--- Environmental Station
 CREATE TABLE enviro.station (
     station_code    VARCHAR(30)     PRIMARY KEY,
     site_code       VARCHAR(30)
@@ -807,11 +670,11 @@ CREATE TABLE enviro.station (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     installation_date DATE,
     description     TEXT,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Water Quality Readings
 CREATE TABLE enviro.water_quality (
     id              BIGSERIAL       PRIMARY KEY,
     station_code    VARCHAR(30)     NOT NULL
@@ -833,12 +696,11 @@ CREATE TABLE enviro.water_quality (
     condition       VARCHAR(50),
     recorded_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_wq_station_time UNIQUE (station_code, record_time, depth)
 );
 
--- Environmental Reading Type (Unified for tide/buoy)
 CREATE TABLE enviro.reading_type (
     type_code       VARCHAR(30)     PRIMARY KEY,
     type_name       VARCHAR(100)    NOT NULL,
@@ -848,7 +710,6 @@ CREATE TABLE enviro.reading_type (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Environmental Readings (Unified table for tide/buoy)
 CREATE TABLE enviro.reading (
     id              BIGSERIAL       PRIMARY KEY,
     station_code    VARCHAR(30)     NOT NULL
@@ -872,12 +733,12 @@ CREATE TABLE enviro.reading (
     notes           TEXT,
     recorded_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_reading_station_type_time UNIQUE (station_code, reading_type, record_time)
 );
 
--- DEPRECATED: Keep for backward compatibility, will be removed
+-- Legacy tables for backward compatibility (will be deprecated)
 CREATE TABLE enviro.tide_reading (
     id              BIGSERIAL       PRIMARY KEY,
     station_code    VARCHAR(30)     NOT NULL
@@ -889,12 +750,11 @@ CREATE TABLE enviro.tide_reading (
     dissolved_oxygen NUMERIC(8,2),
     water_density   NUMERIC(8,4),
     tide_level      NUMERIC(8,2),
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_tide_station_time UNIQUE (station_code, record_time)
 );
 
--- DEPRECATED: Keep for backward compatibility
 CREATE TABLE enviro.buoy_reading (
     id              BIGSERIAL       PRIMARY KEY,
     station_code    VARCHAR(30)     NOT NULL
@@ -906,12 +766,11 @@ CREATE TABLE enviro.buoy_reading (
     dissolved_oxygen NUMERIC(8,2),
     water_density   NUMERIC(8,4),
     tide_level      NUMERIC(8,2),
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_buoy_station_time UNIQUE (station_code, record_time)
 );
 
--- Station Maintenance
 CREATE TABLE enviro.maintenance (
     id              BIGSERIAL       PRIMARY KEY,
     station_code    VARCHAR(30)     NOT NULL
@@ -927,35 +786,13 @@ CREATE TABLE enviro.maintenance (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_env_maint_end_date CHECK (end_date >= start_date OR end_date IS NULL)
 );
 
--- View: Station with Maintenance Info
-CREATE OR REPLACE VIEW enviro.v_station_with_maintenance AS
-SELECT
-    es.*,
-    lm.last_mtc_start,
-    lm.last_mtc_end,
-    lm.last_mtc_type
-FROM enviro.station es
-LEFT JOIN LATERAL (
-    SELECT 
-        em.start_date AS last_mtc_start,
-        em.end_date   AS last_mtc_end,
-        em.maintenance_type AS last_mtc_type
-    FROM   enviro.maintenance em
-    WHERE  em.station_code = es.station_code
-    ORDER  BY em.start_date DESC
-    LIMIT  1
-) lm ON TRUE;
-
 -- ============================================================
--- SCHEMA: commercial (Commercial/Procurement)
+-- SECTION 14: COMMERCIAL SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS commercial;
 
--- Purchase Order Header
 CREATE TABLE commercial.purchase_order (
     po_num              VARCHAR(30)     PRIMARY KEY,
     buyer_code          VARCHAR(30)     NOT NULL
@@ -984,14 +821,13 @@ CREATE TABLE commercial.purchase_order (
     approved_by         VARCHAR(30)
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
     approved_at         TIMESTAMPTZ,
+    tenant_id           UUID,
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_po_target_dates  CHECK (target_end_date >= target_start_date OR target_end_date IS NULL),
     CONSTRAINT chk_po_actual_dates CHECK (actual_end_date >= actual_start_date OR actual_end_date IS NULL)
 );
 
--- Delivery Order
 CREATE TABLE commercial.delivery_order (
     do_num              VARCHAR(30)     PRIMARY KEY,
     po_num              VARCHAR(30)     NOT NULL
@@ -1016,35 +852,17 @@ CREATE TABLE commercial.delivery_order (
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
     approved_by         VARCHAR(30)
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id           UUID,
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_do_target_dates  CHECK (target_end_date >= target_start_date OR target_end_date IS NULL),
     CONSTRAINT chk_do_actual_dates  CHECK (actual_end_date >= actual_start_date OR actual_end_date IS NULL)
 );
 
--- View: DO with remaining volume
-CREATE OR REPLACE VIEW commercial.v_do_remaining_volume AS
-SELECT
-    d.*,
-    p.total_volume AS po_total_volume,
-    p.target_volume AS do_target_volume,
-    COALESCE(d.actual_volume, 0) AS delivered_volume,
-    p.target_volume - COALESCE(d.actual_volume, 0) AS remaining_volume,
-    CASE 
-        WHEN p.target_volume > 0 
-        THEN ROUND((COALESCE(d.actual_volume, 0) / p.target_volume) * 100, 2)
-        ELSE 0 
-    END AS delivery_percentage
-FROM commercial.delivery_order d
-JOIN commercial.purchase_order p ON p.po_num = d.po_num;
-
 -- ============================================================
--- SCHEMA: operational (Operations Management)
+-- SECTION 15: OPERATIONAL SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS operational;
 
--- Work Area
 CREATE TABLE operational.work_area (
     area_code       VARCHAR(30)     PRIMARY KEY,
     name            VARCHAR(150)    NOT NULL,
@@ -1059,12 +877,12 @@ CREATE TABLE operational.work_area (
     site_code       VARCHAR(30)
                         REFERENCES site.info(site_code) ON DELETE SET NULL,
     description     TEXT,
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Shipment Instruction
 CREATE TABLE operational.shipment_instruction (
     si_num              VARCHAR(30)     PRIMARY KEY,
     do_num              VARCHAR(30)     NOT NULL
@@ -1090,15 +908,14 @@ CREATE TABLE operational.shipment_instruction (
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
     approved_by         VARCHAR(30)
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id           UUID,
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_different_fleet CHECK (
         fleet_assist_code IS NULL OR fleet_assist_code <> fleet_main_code
     )
 );
 
--- Work Activity
 CREATE TABLE operational.work_activity (
     activity_num    BIGSERIAL       PRIMARY KEY,
     si_num          VARCHAR(30)     NOT NULL
@@ -1116,14 +933,13 @@ CREATE TABLE operational.work_activity (
     actual_start    TIMESTAMPTZ,
     actual_end      TIMESTAMPTZ,
     notes           TEXT,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_planned_dates CHECK (planned_end >= planned_start OR planned_end IS NULL),
     CONSTRAINT chk_actual_dates  CHECK (actual_end >= actual_start  OR actual_end IS NULL)
 );
 
--- Dredging Records (FIXED: Remove duplicate FK)
 CREATE TABLE operational.dredging_records (
     id               BIGSERIAL      PRIMARY KEY,
     si_num           VARCHAR(30)    NOT NULL
@@ -1139,109 +955,16 @@ CREATE TABLE operational.dredging_records (
     created_by       VARCHAR(30)
                             REFERENCES "user".info(user_code) ON DELETE SET NULL,
     notes            TEXT,
+    tenant_id        UUID,
     created_at       TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_dredging_daily UNIQUE (activity_num, record_date)
 );
 
--- Function to convert volume to target UOM
-CREATE OR REPLACE FUNCTION operational.fn_convert_volume_to_target_uom(
-    p_volume     NUMERIC,
-    p_from_uom   VARCHAR,
-    p_to_uom     VARCHAR
-) RETURNS NUMERIC AS $$
-DECLARE
-    v_converted NUMERIC;
-BEGIN
-    IF p_from_uom = p_to_uom THEN
-        RETURN p_volume;
-    END IF;
-
-    SELECT conv_value * p_volume INTO v_converted
-    FROM param.unit_conversion
-    WHERE uom_from = p_from_uom
-      AND uom_to   = p_to_uom
-      AND is_active = TRUE;
-
-    IF v_converted IS NULL THEN
-        -- Try reverse conversion
-        SELECT (p_volume / conv_value) INTO v_converted
-        FROM param.unit_conversion
-        WHERE uom_from = p_to_uom
-          AND uom_to   = p_from_uom
-          AND is_active = TRUE;
-    END IF;
-
-    RETURN COALESCE(v_converted, p_volume);
-END;
-$$ LANGUAGE plpgsql;
-
--- Function to validate dredging volume (FIXED: with UOM conversion)
-CREATE OR REPLACE FUNCTION operational.fn_validate_dredging_volume() 
-RETURNS TRIGGER AS $$
-DECLARE 
-    v_do_num         VARCHAR(30); 
-    v_target         NUMERIC(18,4); 
-    v_target_uom     VARCHAR(20); 
-    v_total          NUMERIC(18,4); 
-    v_converted_vol  NUMERIC(18,4);
-BEGIN 
-    -- Get DO and target info
-    SELECT si.do_num, d_o.target_volume, d_o.uom_code
-    INTO v_do_num, v_target, v_target_uom
-    FROM operational.shipment_instruction si 
-    JOIN commercial.delivery_order d_o ON d_o.do_num = si.do_num 
-    WHERE si.si_num = NEW.si_num;
-
-    IF v_do_num IS NULL OR v_target IS NULL THEN
-        RETURN NEW;  -- Allow if no DO linked or no target
-    END IF;
-
-    -- Convert new volume to target UOM
-    v_converted_vol := operational.fn_convert_volume_to_target_uom(
-        NEW.dredging_volume,
-        NEW.uom_code,
-        v_target_uom
-    );
-
-    -- Calculate total already recorded for this DO
-    SELECT COALESCE(SUM(
-        operational.fn_convert_volume_to_target_uom(dr.dredging_volume, dr.uom_code, v_target_uom)
-    ), 0)
-    INTO v_total
-    FROM operational.dredging_records dr
-    JOIN operational.shipment_instruction si ON si.si_num = dr.si_num
-    WHERE si.do_num = v_do_num
-      AND dr.id <> COALESCE(NEW.id, -1);
-
-    -- Check if exceeds
-    IF (v_total + v_converted_vol) > v_target THEN
-        RAISE EXCEPTION 
-            'VOLUME_EXCEEDED: Batas Volume Terlampaui! Pengerukan baru sebesar % % akan membuat total volume (%) melebihi batas target Delivery Order % (%) sebesar % %.',
-            NEW.dredging_volume, NEW.uom_code, 
-            ROUND(v_total + v_converted_vol, 4), 
-            v_do_num, 
-            ROUND(v_target, 4), v_target_uom,
-            ROUND((v_total + v_converted_vol) - v_target, 4), v_target_uom;
-    END IF;
-
-    RETURN NEW;
-END;  
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER trg_validate_dredging_volume
-BEFORE INSERT OR UPDATE OF dredging_volume, uom_code
-ON operational.dredging_records
-FOR EACH ROW
-EXECUTE FUNCTION operational.fn_validate_dredging_volume();
-
 -- ============================================================
--- SCHEMA: voyage (Vessel Tracking)
+-- SECTION 16: VOYAGE SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS voyage;
 
--- Current Voyage Position
 CREATE TABLE voyage.voyage (
     id              BIGSERIAL       PRIMARY KEY,
     fleet_code      VARCHAR(30)     NOT NULL
@@ -1266,11 +989,11 @@ CREATE TABLE voyage.voyage (
     status          VARCHAR(30)
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     source          VARCHAR(30)     DEFAULT 'AIS',
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Voyage History (Immutable)
 CREATE TABLE voyage.voyage_hist (
     id              BIGSERIAL       PRIMARY KEY,
     fleet_code      VARCHAR(30)     NOT NULL
@@ -1288,35 +1011,15 @@ CREATE TABLE voyage.voyage_hist (
     speed           NUMERIC(8,2),
     heading         NUMERIC(5,2),
     record_time     TIMESTAMPTZ     NOT NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_voyage_hist_fleet_time UNIQUE (fleet_code, record_time)
 );
 
--- Function to archive current position to history
-CREATE OR REPLACE FUNCTION voyage.fn_archive_to_history()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Archive to history before updating
-    INSERT INTO voyage.voyage_hist (
-        fleet_code, voyage_no, lat, long, speed, heading, record_time
-    ) VALUES (
-        OLD.fleet_code, OLD.voyage_no, OLD.lat, OLD.long, OLD.speed, OLD.heading, OLD.record_time
-    );
-    RETURN OLD;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER trg_archive_voyage
-BEFORE UPDATE ON voyage.voyage
-FOR EACH ROW EXECUTE FUNCTION voyage.fn_archive_to_history();
-
 -- ============================================================
--- SCHEMA: financial (Financial/Accounting)
+-- SECTION 17: FINANCIAL SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS financial;
 
--- Chart of Accounts
 CREATE TABLE financial.account (
     account_code    VARCHAR(30)     PRIMARY KEY,
     account_name    VARCHAR(200)    NOT NULL,
@@ -1337,11 +1040,10 @@ CREATE TABLE financial.account (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Journal Entry Header
 CREATE TABLE financial.journal (
     journal_id      BIGSERIAL       PRIMARY KEY,
     journal_no      VARCHAR(30)     NOT NULL UNIQUE,
-    journal_date     DATE            NOT NULL,
+    journal_date    DATE            NOT NULL,
     period_year     SMALLINT        NOT NULL,
     period_month    SMALLINT        NOT NULL,
     journal_type    VARCHAR(30)     NOT NULL,
@@ -1355,14 +1057,13 @@ CREATE TABLE financial.journal (
     posted_at       TIMESTAMPTZ,
     created_by      VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_journal_no UNIQUE (journal_no),
     CONSTRAINT chk_period_month CHECK (period_month BETWEEN 1 AND 12)
 );
 
--- Journal Entry Line
 CREATE TABLE financial.journal_line (
     line_id         BIGSERIAL       PRIMARY KEY,
     journal_id      BIGINT          NOT NULL
@@ -1379,44 +1080,13 @@ CREATE TABLE financial.journal_line (
     project_code    VARCHAR(30),
     partner_code    VARCHAR(30)
                         REFERENCES partner.info(partner_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_debit_or_credit CHECK (
         (debit > 0 AND credit = 0) OR (debit = 0 AND credit > 0)
     )
 );
 
--- Function to validate journal balance
-CREATE OR REPLACE FUNCTION financial.fn_validate_journal_balance()
-RETURNS TRIGGER AS $$
-DECLARE
-    v_total_debit  NUMERIC(18,2);
-    v_total_credit NUMERIC(18,2);
-    v_journal_no   VARCHAR(30);
-BEGIN
-    SELECT journal_no INTO v_journal_no
-    FROM financial.journal WHERE journal_id = NEW.journal_id;
-
-    SELECT COALESCE(SUM(debit), 0), COALESCE(SUM(credit), 0)
-    INTO v_total_debit, v_total_credit
-    FROM financial.journal_line
-    WHERE journal_id = NEW.journal_id;
-
-    IF v_total_debit <> v_total_credit THEN
-        RAISE EXCEPTION 
-            'JOURNAL_UNBALANCED: Journal % has unbalanced entries. Debit: % | Credit: %',
-            v_journal_no, v_total_debit, v_total_credit;
-    END IF;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE TRIGGER trg_validate_journal_balance
-AFTER INSERT OR UPDATE ON financial.journal_line
-FOR EACH ROW EXECUTE FUNCTION financial.fn_validate_journal_balance();
-
--- Invoice Header
 CREATE TABLE financial.invoice (
     invoice_id      BIGSERIAL       PRIMARY KEY,
     invoice_no      VARCHAR(50)     NOT NULL UNIQUE,
@@ -1430,7 +1100,7 @@ CREATE TABLE financial.invoice (
     subtotal        NUMERIC(18,2)   NOT NULL DEFAULT 0,
     tax_amount      NUMERIC(18,2)   NOT NULL DEFAULT 0,
     discount_amount NUMERIC(18,2)   NOT NULL DEFAULT 0,
-    total_amount    NUMERIC(18,2)  NOT NULL DEFAULT 0,
+    total_amount    NUMERIC(18,2)   NOT NULL DEFAULT 0,
     status          VARCHAR(30)
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     source_module   VARCHAR(30),
@@ -1440,20 +1110,20 @@ CREATE TABLE financial.invoice (
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
     approved_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Invoice Line
 CREATE TABLE financial.invoice_line (
     line_id         BIGSERIAL       PRIMARY KEY,
     invoice_id      BIGINT          NOT NULL
                         REFERENCES financial.invoice(invoice_id) ON DELETE CASCADE,
-    description     VARCHAR(500)    NOT NULL,
-    quantity        NUMERIC(18,4)   NOT NULL DEFAULT 1,
+    description     VARCHAR(500)   NOT NULL,
+    quantity        NUMERIC(18,4)  NOT NULL DEFAULT 1,
     uom_code        VARCHAR(20)
                         REFERENCES param.unit_of_measure(uom_code) ON DELETE SET NULL,
-    unit_price      NUMERIC(18,4)   NOT NULL DEFAULT 0,
+    unit_price      NUMERIC(18,4)  NOT NULL DEFAULT 0,
     tax_code        VARCHAR(30),
     tax_rate        NUMERIC(5,2)    DEFAULT 0,
     line_total      NUMERIC(18,2)   NOT NULL DEFAULT 0,
@@ -1461,7 +1131,6 @@ CREATE TABLE financial.invoice_line (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Payment Header
 CREATE TABLE financial.payment (
     payment_id      BIGSERIAL       PRIMARY KEY,
     payment_no      VARCHAR(50)     NOT NULL UNIQUE,
@@ -1481,11 +1150,11 @@ CREATE TABLE financial.payment (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     created_by      VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Payment Line (for linking to invoices)
 CREATE TABLE financial.payment_line (
     line_id         BIGSERIAL       PRIMARY KEY,
     payment_id      BIGINT          NOT NULL
@@ -1500,7 +1169,6 @@ CREATE TABLE financial.payment_line (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Bank Account
 CREATE TABLE financial.bank_account (
     account_id      VARCHAR(30)     PRIMARY KEY,
     bank_name       VARCHAR(100)    NOT NULL,
@@ -1511,12 +1179,12 @@ CREATE TABLE financial.bank_account (
                         REFERENCES param.currency(currency_code) ON DELETE RESTRICT,
     branch          VARCHAR(100),
     swift_code      VARCHAR(20),
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Bank Transaction
 CREATE TABLE financial.bank_transaction (
     trans_id        BIGSERIAL       PRIMARY KEY,
     account_id      VARCHAR(30)     NOT NULL
@@ -1535,7 +1203,6 @@ CREATE TABLE financial.bank_transaction (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Cost Center
 CREATE TABLE financial.cost_center (
     cost_center_code VARCHAR(30)    PRIMARY KEY,
     cost_center_name VARCHAR(200)    NOT NULL,
@@ -1546,17 +1213,16 @@ CREATE TABLE financial.cost_center (
     manager_user    VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
     budget_amount   NUMERIC(18,2),
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 -- ============================================================
--- SCHEMA: hse (Health, Safety, Environment)
+-- SECTION 18: HSE SCHEMA TABLES
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS hse;
 
--- HSE Incident Type
 CREATE TABLE hse.incident_type (
     type_code       VARCHAR(30)     PRIMARY KEY,
     type_name       VARCHAR(100)    NOT NULL,
@@ -1567,7 +1233,6 @@ CREATE TABLE hse.incident_type (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- HSE Incident
 CREATE TABLE hse.incident (
     incident_id     BIGSERIAL       PRIMARY KEY,
     incident_no     VARCHAR(30)     NOT NULL UNIQUE,
@@ -1596,11 +1261,11 @@ CREATE TABLE hse.incident (
     approved_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
     closed_at       TIMESTAMPTZ,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Incident Witness
 CREATE TABLE hse.incident_witness (
     witness_id      BIGSERIAL       PRIMARY KEY,
     incident_id     BIGINT          NOT NULL
@@ -1611,7 +1276,6 @@ CREATE TABLE hse.incident_witness (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- HSE Permit
 CREATE TABLE hse.permit (
     permit_id       BIGSERIAL       PRIMARY KEY,
     permit_no       VARCHAR(30)     NOT NULL UNIQUE,
@@ -1634,13 +1298,12 @@ CREATE TABLE hse.permit (
     approved_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
     issued_at       TIMESTAMPTZ,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT chk_permit_dates CHECK (end_date >= start_date)
 );
 
--- Permit Approval/Rejection Log
 CREATE TABLE hse.permit_approval (
     approval_id     BIGSERIAL       PRIMARY KEY,
     permit_id       BIGINT          NOT NULL
@@ -1653,11 +1316,10 @@ CREATE TABLE hse.permit_approval (
     approved_at     TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- HSE Inspection
 CREATE TABLE hse.inspection (
     inspection_id   BIGSERIAL       PRIMARY KEY,
     inspection_no   VARCHAR(30)     NOT NULL UNIQUE,
-    inspection_type VARCHAR(50)     NOT NULL,
+    inspection_type VARCHAR(50)      NOT NULL,
     site_code       VARCHAR(30)
                         REFERENCES site.info(site_code) ON DELETE SET NULL,
     work_area_code  VARCHAR(30)
@@ -1672,11 +1334,11 @@ CREATE TABLE hse.inspection (
     status          VARCHAR(30)
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     summary         TEXT,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Inspection Finding
 CREATE TABLE hse.inspection_finding (
     finding_id      BIGSERIAL       PRIMARY KEY,
     inspection_id   BIGINT          NOT NULL
@@ -1695,11 +1357,9 @@ CREATE TABLE hse.inspection_finding (
     closed_at       TIMESTAMPTZ,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
     CONSTRAINT uq_inspection_finding UNIQUE (inspection_id, finding_no)
 );
 
--- HSE Training
 CREATE TABLE hse.training (
     training_id     BIGSERIAL       PRIMARY KEY,
     training_code   VARCHAR(30)     NOT NULL UNIQUE,
@@ -1712,7 +1372,6 @@ CREATE TABLE hse.training (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- Employee Training Record
 CREATE TABLE hse.employee_training (
     record_id       BIGSERIAL       PRIMARY KEY,
     user_code       VARCHAR(30)     NOT NULL
@@ -1730,12 +1389,11 @@ CREATE TABLE hse.employee_training (
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- HSE PPE Inventory
 CREATE TABLE hse.ppe_inventory (
     ppe_id          BIGSERIAL       PRIMARY KEY,
     ppe_code        VARCHAR(30)     NOT NULL UNIQUE,
     ppe_name        VARCHAR(150)    NOT NULL,
-    category        VARCHAR(50)     NOT NULL,
+    category        VARCHAR(50)      NOT NULL,
     size            VARCHAR(20),
     color           VARCHAR(30),
     quantity_total  INT             NOT NULL DEFAULT 0,
@@ -1745,12 +1403,12 @@ CREATE TABLE hse.ppe_inventory (
                         REFERENCES site.info(site_code) ON DELETE SET NULL,
     storage_location VARCHAR(100),
     reorder_level   INT,
+    tenant_id       UUID,
     is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- PPE Distribution
 CREATE TABLE hse.ppe_distribution (
     dist_id         BIGSERIAL       PRIMARY KEY,
     user_code       VARCHAR(30)     NOT NULL
@@ -1768,17 +1426,16 @@ CREATE TABLE hse.ppe_distribution (
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
--- HSE Risk Assessment
 CREATE TABLE hse.risk_assessment (
     assessment_id   BIGSERIAL       PRIMARY KEY,
     assessment_no   VARCHAR(30)     NOT NULL UNIQUE,
-    activity_name   VARCHAR(200)    NOT NULL,
+    activity_name  VARCHAR(200)    NOT NULL,
     site_code       VARCHAR(30)
                         REFERENCES site.info(site_code) ON DELETE SET NULL,
     assessment_date DATE            NOT NULL,
     assessor        VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
-    risk_level      VARCHAR(20)
+    risk_level     VARCHAR(20)
                         CHECK (risk_level IN ('LOW','MEDIUM','HIGH','CRITICAL')),
     hazard_identified TEXT,
     risk_controls   TEXT,
@@ -1787,289 +1444,908 @@ CREATE TABLE hse.risk_assessment (
                         REFERENCES param.status(status_code) ON DELETE SET NULL,
     approved_by     VARCHAR(30)
                         REFERENCES "user".info(user_code) ON DELETE SET NULL,
+    tenant_id       UUID,
     created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
 
 -- ============================================================
--- SCHEMA: reporting (Materialized Views for Reporting)
+-- SECTION 19: SECURITY SCHEMA TABLES (Supabase Integration)
 -- ============================================================
-CREATE SCHEMA IF NOT EXISTS reporting;
 
--- Materialized View: Daily Tide Readings Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.tide_read_daily AS
+CREATE TABLE security.app_user (
+    auth_user_id    UUID            PRIMARY KEY
+                        REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_code       VARCHAR(30)     NOT NULL UNIQUE,
+    name            VARCHAR(150)    NOT NULL,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    is_super_admin  BOOLEAN         NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE security.tenant (
+    tenant_id       UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_code     VARCHAR(30)     NOT NULL UNIQUE,
+    tenant_name     VARCHAR(200)    NOT NULL,
+    site_code       VARCHAR(30)
+                        REFERENCES site.info(site_code) ON DELETE SET NULL,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE security.user_scope (
+    scope_id        BIGSERIAL       PRIMARY KEY,
+    auth_user_id    UUID            NOT NULL
+                        REFERENCES security.app_user(auth_user_id) ON DELETE CASCADE,
+    tenant_id       UUID            NOT NULL
+                        REFERENCES security.tenant(tenant_id) ON DELETE RESTRICT,
+    partner_code    VARCHAR(30),
+    buyer_code      VARCHAR(30),
+    role_code       VARCHAR(50)      NOT NULL,
+    is_primary      BOOLEAN         NOT NULL DEFAULT FALSE,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    valid_from      TIMESTAMPTZ,
+    valid_until     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_user_tenant UNIQUE (auth_user_id, tenant_id)
+);
+
+CREATE TABLE security.permission (
+    permission_id   BIGSERIAL       PRIMARY KEY,
+    permission_code VARCHAR(100)    NOT NULL UNIQUE,
+    permission_name VARCHAR(200)     NOT NULL,
+    module          VARCHAR(50)     NOT NULL,
+    description     TEXT,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE security.role_permission (
+    id              BIGSERIAL       PRIMARY KEY,
+    role_code       VARCHAR(50)     NOT NULL,
+    permission_code VARCHAR(100)    NOT NULL
+                        REFERENCES security.permission(permission_code) ON DELETE CASCADE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_role_permission UNIQUE (role_code, permission_code)
+);
+
+-- ============================================================
+-- SECTION 20: AUDIT SCHEMA TABLES
+-- ============================================================
+
+CREATE TABLE audit.log (
+    log_id              BIGSERIAL       PRIMARY KEY,
+    tenant_id          UUID,
+    auth_user_id       UUID,
+    user_code          VARCHAR(30),
+    action             VARCHAR(20)     NOT NULL,
+    table_schema        VARCHAR(100)    NOT NULL,
+    table_name          VARCHAR(100)    NOT NULL,
+    record_pk          TEXT,
+    record_pk_name      VARCHAR(100),
+    old_data            JSONB,
+    new_data            JSONB,
+    changed_fields      JSONB,
+    request_id          UUID,
+    source_ip           INET,
+    user_agent          TEXT,
+    app_version         VARCHAR(50),
+    executed_at         TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    execution_time_ms   BIGINT
+);
+
+-- ============================================================
+-- SECTION 21: WORKFLOW SCHEMA TABLES
+-- ============================================================
+
+CREATE TABLE workflow.definition (
+    workflow_id     BIGSERIAL       PRIMARY KEY,
+    workflow_code   VARCHAR(50)     NOT NULL UNIQUE,
+    workflow_name   VARCHAR(200)    NOT NULL,
+    module          VARCHAR(50)     NOT NULL,
+    description     TEXT,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE workflow.step (
+    step_id                 BIGSERIAL       PRIMARY KEY,
+    workflow_id             BIGINT          NOT NULL
+                                REFERENCES workflow.definition(workflow_id) ON DELETE CASCADE,
+    step_order              SMALLINT        NOT NULL,
+    step_name               VARCHAR(100)    NOT NULL,
+    step_type               VARCHAR(30)     NOT NULL
+                                CHECK (step_type IN ('START','APPROVAL','NOTIFICATION','CONDITION','END')),
+    approver_role           VARCHAR(50),
+    approver_user           VARCHAR(30),
+    is_auto_approve         BOOLEAN         DEFAULT FALSE,
+    timeout_hours           INT,
+    required_approval_count INT             DEFAULT 1,
+    next_step_order_approve  SMALLINT,
+    next_step_order_reject  SMALLINT,
+    can_skip                BOOLEAN         DEFAULT FALSE,
+    is_active               BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_workflow_step_order UNIQUE (workflow_id, step_order)
+);
+
+CREATE TABLE workflow.instance (
+    instance_id     BIGSERIAL       PRIMARY KEY,
+    instance_code   VARCHAR(50)     NOT NULL UNIQUE,
+    workflow_id     BIGINT          NOT NULL
+                        REFERENCES workflow.definition(workflow_id) ON DELETE RESTRICT,
+    document_type   VARCHAR(50)     NOT NULL,
+    document_id     VARCHAR(50)     NOT NULL,
+    current_step_order SMALLINT     NOT NULL DEFAULT 1,
+    status          VARCHAR(30)     NOT NULL
+                        CHECK (status IN ('PENDING','IN_PROGRESS','APPROVED','REJECTED','CANCELLED','EXPIRED')),
+    initiated_by    VARCHAR(30),
+    initiated_at    TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    completed_at    TIMESTAMPTZ,
+    due_date        TIMESTAMPTZ,
+    priority        VARCHAR(20)     DEFAULT 'NORMAL',
+    notes           TEXT,
+    is_locked       BOOLEAN         DEFAULT FALSE,
+    metadata        JSONB,
+    tenant_id       UUID,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_instance_doc UNIQUE (document_type, document_id)
+);
+
+CREATE TABLE workflow.instance_step (
+    instance_step_id BIGSERIAL      PRIMARY KEY,
+    instance_id     BIGINT         NOT NULL
+                        REFERENCES workflow.instance(instance_id) ON DELETE CASCADE,
+    step_id         BIGINT         NOT NULL
+                        REFERENCES workflow.step(step_id) ON DELETE RESTRICT,
+    step_order      SMALLINT       NOT NULL,
+    status          VARCHAR(30)     NOT NULL
+                        CHECK (status IN ('PENDING','IN_PROGRESS','APPROVED','REJECTED','SKIPPED')),
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ,
+    due_at          TIMESTAMPTZ,
+    assigned_to     VARCHAR(30),
+    comments        TEXT,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_instance_step_order UNIQUE (instance_id, step_order)
+);
+
+CREATE TABLE workflow.approval (
+    approval_id     BIGSERIAL       PRIMARY KEY,
+    instance_step_id BIGINT         NOT NULL
+                        REFERENCES workflow.instance_step(instance_step_id) ON DELETE CASCADE,
+    approver_user   VARCHAR(30),
+    approver_name   VARCHAR(150),
+    decision        VARCHAR(20)     NOT NULL
+                        CHECK (decision IN ('APPROVED','REJECTED','CONDITIONAL')),
+    comments        TEXT,
+    sequence_no     SMALLINT        NOT NULL,
+    decided_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    ip_address      INET,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE workflow.history (
+    history_id      BIGSERIAL       PRIMARY KEY,
+    instance_id     BIGINT         NOT NULL
+                        REFERENCES workflow.instance(instance_id) ON DELETE CASCADE,
+    action          VARCHAR(50)     NOT NULL,
+    from_step_order INT,
+    to_step_order   INT,
+    performed_by    VARCHAR(30),
+    performed_at    TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    details         JSONB
+);
+
+-- ============================================================
+-- SECTION 22: DOCUMENT SCHEMA TABLES
+-- ============================================================
+
+CREATE TABLE document.type (
+    type_id         BIGSERIAL       PRIMARY KEY,
+    type_code       VARCHAR(50)     NOT NULL UNIQUE,
+    type_name       VARCHAR(200)    NOT NULL,
+    description     TEXT,
+    max_size_kb     INT             DEFAULT 10240,
+    allowed_extensions TEXT,
+    category        VARCHAR(50),
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE document.document (
+    document_id     BIGSERIAL       PRIMARY KEY,
+    document_code   VARCHAR(50)     NOT NULL UNIQUE,
+    document_name   VARCHAR(300)    NOT NULL,
+    type_code       VARCHAR(50)     NOT NULL
+                        REFERENCES document.type(type_code) ON DELETE RESTRICT,
+    entity_type     VARCHAR(50)     NOT NULL,
+    entity_id       VARCHAR(50)     NOT NULL,
+    tenant_id       UUID,
+    current_version INT             NOT NULL DEFAULT 1,
+    status          VARCHAR(30),
+    uploaded_by     VARCHAR(30),
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_document_entity UNIQUE (entity_type, entity_id)
+);
+
+CREATE TABLE document.version (
+    version_id      BIGSERIAL       PRIMARY KEY,
+    document_id     BIGINT          NOT NULL
+                        REFERENCES document.document(document_id) ON DELETE CASCADE,
+    version_no      INT             NOT NULL,
+    file_name       VARCHAR(300)    NOT NULL,
+    file_path       VARCHAR(500)    NOT NULL,
+    file_size       BIGINT,
+    mime_type       VARCHAR(100),
+    checksum        VARCHAR(64),
+    storage_bucket  VARCHAR(100),
+    is_current      BOOLEAN         NOT NULL DEFAULT FALSE,
+    version_notes   TEXT,
+    uploaded_by     VARCHAR(30),
+    uploaded_at     TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_document_version UNIQUE (document_id, version_no),
+    CONSTRAINT uq_current_version UNIQUE (document_id) WHERE is_current = TRUE
+);
+
+CREATE TABLE document.permission (
+    perm_id         BIGSERIAL       PRIMARY KEY,
+    document_id     BIGINT          NOT NULL
+                        REFERENCES document.document(document_id) ON DELETE CASCADE,
+    user_code       VARCHAR(30),
+    role_name       VARCHAR(50),
+    can_view        BOOLEAN         DEFAULT TRUE,
+    can_download    BOOLEAN         DEFAULT TRUE,
+    can_edit        BOOLEAN         DEFAULT FALSE,
+    can_delete      BOOLEAN         DEFAULT FALSE,
+    expires_at      TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE document.signature (
+    sign_id         BIGSERIAL       PRIMARY KEY,
+    document_id     BIGINT          NOT NULL
+                        REFERENCES document.document(document_id) ON DELETE CASCADE,
+    sign_order      SMALLINT        NOT NULL,
+    signer_user     VARCHAR(30),
+    signer_name     VARCHAR(150),
+    signer_role     VARCHAR(50),
+    signature_data  TEXT,
+    signed_at       TIMESTAMPTZ,
+    is_valid        BOOLEAN,
+    reason          VARCHAR(200),
+    ip_address      INET,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE document.audit (
+    audit_id        BIGSERIAL       PRIMARY KEY,
+    document_id     BIGINT          NOT NULL
+                        REFERENCES document.document(document_id) ON DELETE CASCADE,
+    action          VARCHAR(50)     NOT NULL,
+    user_code       VARCHAR(30),
+    version_no      INT,
+    details         JSONB,
+    executed_at     TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+-- ============================================================
+-- SECTION 23: TELEMETRY SCHEMA TABLES (GPS/AIS)
+-- ============================================================
+
+CREATE TABLE telemetry.raw_message (
+    message_id      BIGSERIAL       PRIMARY KEY,
+    tenant_id       UUID            NOT NULL,
+    partner_code    VARCHAR(30)     NOT NULL,
+    fleet_code      VARCHAR(30),
+    mmsi            VARCHAR(20),
+    imo             VARCHAR(20),
+    external_id     VARCHAR(100),
+    source_system   VARCHAR(50)     NOT NULL,
+    message_type    VARCHAR(30),
+    raw_payload     JSONB           NOT NULL,
+    received_at     TIMESTAMPTZ     NOT NULL,
+    processed_at    TIMESTAMPTZ,
+    is_processed    BOOLEAN         DEFAULT FALSE
+);
+
+CREATE TABLE telemetry.ais_position (
+    position_id     BIGSERIAL       PRIMARY KEY,
+    tenant_id       UUID            NOT NULL,
+    partner_code    VARCHAR(30)     NOT NULL,
+    fleet_code      VARCHAR(30),
+    mmsi            VARCHAR(20)     NOT NULL,
+    imo             VARCHAR(20),
+    message_type    VARCHAR(30),
+    latitude        NUMERIC(10,7)   NOT NULL
+                        CHECK (latitude >= -90 AND latitude <= 90),
+    longitude       NUMERIC(11,7)   NOT NULL
+                        CHECK (longitude >= -180 AND longitude <= 180),
+    geom            GEOMETRY(Point, 4326) GENERATED ALWAYS AS (
+                        ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+                    ) STORED,
+    speed_over_ground NUMERIC(8,2),
+    course_over_ground NUMERIC(5,2),
+    heading         NUMERIC(5,2),
+    navigation_status VARCHAR(30),
+    destination     VARCHAR(200),
+    eta             TIMESTAMPTZ,
+    data_quality    VARCHAR(20),
+    reported_at     TIMESTAMPTZ     NOT NULL,
+    received_at     TIMESTAMPTZ     NOT NULL,
+    source_system   VARCHAR(50),
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+) PARTITION BY RANGE (reported_at);
+
+-- AIS Partitions
+CREATE TABLE telemetry.ais_position_2025 PARTITION OF telemetry.ais_position
+    FOR VALUES FROM ('2025-01-01') TO ('2026-01-01');
+CREATE TABLE telemetry.ais_position_2026 PARTITION OF telemetry.ais_position
+    FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+CREATE TABLE telemetry.ais_position_2027 PARTITION OF telemetry.ais_position
+    FOR VALUES FROM ('2027-01-01') TO ('2028-01-01');
+CREATE TABLE telemetry.ais_position_2028 PARTITION OF telemetry.ais_position
+    FOR VALUES FROM ('2028-01-01') TO ('2029-01-01');
+CREATE TABLE telemetry.ais_position_2029 PARTITION OF telemetry.ais_position
+    FOR VALUES FROM ('2029-01-01') TO ('2030-01-01');
+CREATE TABLE telemetry.ais_position_2030 PARTITION OF telemetry.ais_position
+    FOR VALUES FROM ('2030-01-01') TO ('2031-01-01');
+CREATE TABLE telemetry.ais_position_default PARTITION OF telemetry.ais_position DEFAULT;
+
+CREATE TABLE telemetry.vessel_position_latest (
+    fleet_code      VARCHAR(30)     PRIMARY KEY,
+    tenant_id       UUID            NOT NULL,
+    partner_code    VARCHAR(30)     NOT NULL,
+    mmsi            VARCHAR(20),
+    latitude        NUMERIC(10,7),
+    longitude       NUMERIC(11,7),
+    geom            GEOMETRY(Point, 4326),
+    speed_over_ground NUMERIC(8,2),
+    course_over_ground NUMERIC(5,2),
+    heading         NUMERIC(5,2),
+    navigation_status VARCHAR(30),
+    destination     VARCHAR(200),
+    eta             TIMESTAMPTZ,
+    last_update     TIMESTAMPTZ     NOT NULL,
+    data_quality    VARCHAR(20),
+    source_system   VARCHAR(50),
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE telemetry.tracking_health (
+    id              BIGSERIAL       PRIMARY KEY,
+    tenant_id       UUID            NOT NULL,
+    fleet_code      VARCHAR(30)     NOT NULL,
+    partner_code    VARCHAR(30)     NOT NULL,
+    check_time      TIMESTAMPTZ     NOT NULL,
+    is_online       BOOLEAN         NOT NULL,
+    last_position_at TIMESTAMPTZ,
+    last_message_at TIMESTAMPTZ,
+    gap_minutes     NUMERIC(10,2),
+    alert_type      VARCHAR(30),
+    alert_level     VARCHAR(20),
+    notes           TEXT,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE telemetry.geofence (
+    geofence_id     BIGSERIAL       PRIMARY KEY,
+    tenant_id       UUID            NOT NULL,
+    geofence_code   VARCHAR(50)     NOT NULL UNIQUE,
+    name            VARCHAR(200)    NOT NULL,
+    geofence_type   VARCHAR(30)     NOT NULL,
+    geom            GEOMETRY        NOT NULL,
+    radius_meters   NUMERIC(12,2),
+    site_code       VARCHAR(30)
+                        REFERENCES site.info(site_code) ON DELETE SET NULL,
+    is_active       BOOLEAN         NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE telemetry.geofence_event (
+    event_id        BIGSERIAL       PRIMARY KEY,
+    tenant_id       UUID            NOT NULL,
+    geofence_id     BIGINT          NOT NULL
+                        REFERENCES telemetry.geofence(geofence_id) ON DELETE RESTRICT,
+    fleet_code      VARCHAR(30)     NOT NULL,
+    event_type      VARCHAR(20)     NOT NULL,
+    event_time      TIMESTAMPTZ     NOT NULL,
+    position_at_event GEOMETRY(Point, 4326),
+    distance_from_center NUMERIC(12,2),
+    created_at      TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    CONSTRAINT uq_geofence_event UNIQUE (geofence_id, fleet_code, event_time)
+);
+
+-- ============================================================
+-- SECTION 24: REPORTING MATERIALIZED VIEWS
+-- ============================================================
+
+CREATE MATERIALIZED VIEW reporting.tide_read_daily (
+    tenant_id, station_code, station_name, site_code, record_date,
+    reading_count, avg_tide_level, min_tide_level, max_tide_level,
+    avg_salinity, avg_dissolved_oxygen, last_reading_time
+) AS
 SELECT
-    s.station_code,
-    s.name AS station_name,
-    s.site_code,
-    DATE_TRUNC('day', tr.record_time) AS record_date,
-    COUNT(*) AS reading_count,
-    AVG(tr.tide_level) AS avg_tide_level,
-    MIN(tr.tide_level) AS min_tide_level,
-    MAX(tr.tide_level) AS max_tide_level,
-    AVG(tr.salinity) AS avg_salinity,
-    AVG(tr.dissolved_oxygen) AS avg_dissolved_oxygen,
-    AVG(tr.current_speed) AS avg_current_speed,
-    MAX(tr.record_time) AS last_reading_time
-FROM enviro.station s
-JOIN enviro.tide_reading tr ON tr.station_code = s.station_code
-GROUP BY s.station_code, s.name, s.site_code,
-         DATE_TRUNC('day', tr.record_time)
+    COALESCE(s.tenant_id, '00000000-0000-0000-0000-000000000000'::UUID),
+    s.station_code, s.name, s.site_code,
+    DATE_TRUNC('day', tr.record_time),
+    COUNT(*)::INT, AVG(tr.tide_level), MIN(tr.tide_level), MAX(tr.tide_level),
+    AVG(tr.salinity), AVG(tr.dissolved_oxygen), MAX(tr.record_time)
+FROM enviro.tide_reading tr
+JOIN enviro.station s ON s.station_code = tr.station_code
+GROUP BY s.tenant_id, s.station_code, s.name, s.site_code, DATE_TRUNC('day', tr.record_time)
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tide_daily_station_date
-    ON reporting.tide_read_daily(station_code, record_date);
-
--- Materialized View: Weekly Tide Readings Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.tide_read_weekly AS
+CREATE MATERIALIZED VIEW reporting.buoy_read_daily (
+    tenant_id, station_code, station_name, site_code, record_date,
+    reading_count, avg_tide_level, avg_salinity, avg_current_speed
+) AS
 SELECT
-    s.station_code,
-    s.name AS station_name,
-    s.site_code,
-    DATE_TRUNC('week', tr.record_time) AS record_week,
-    COUNT(*) AS reading_count,
-    AVG(tr.tide_level) AS avg_tide_level,
-    MIN(tr.tide_level) AS min_tide_level,
-    MAX(tr.tide_level) AS max_tide_level,
-    AVG(tr.salinity) AS avg_salinity,
-    AVG(tr.dissolved_oxygen) AS avg_dissolved_oxygen,
-    AVG(tr.current_speed) AS avg_current_speed
-FROM enviro.station s
-JOIN enviro.tide_reading tr ON tr.station_code = s.station_code
-GROUP BY s.station_code, s.name, s.site_code,
-         DATE_TRUNC('week', tr.record_time)
+    COALESCE(s.tenant_id, '00000000-0000-0000-0000-000000000000'::UUID),
+    s.station_code, s.name, s.site_code,
+    DATE_TRUNC('day', br.record_time),
+    COUNT(*)::INT, AVG(br.tide_level), AVG(br.salinity), AVG(br.current_speed)
+FROM enviro.buoy_reading br
+JOIN enviro.station s ON s.station_code = br.station_code
+GROUP BY s.tenant_id, s.station_code, s.name, s.site_code, DATE_TRUNC('day', br.record_time)
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tide_weekly_station_week
-    ON reporting.tide_read_weekly(station_code, record_week);
-
--- Materialized View: Yearly Tide Readings Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.tide_read_yearly AS
+CREATE MATERIALIZED VIEW reporting.dredging_production (
+    tenant_id, si_num, do_num, po_num, buyer_code, buyer_name,
+    fleet_code, fleet_name, work_date, daily_volume, uom_code, record_count
+) AS
 SELECT
-    s.station_code,
-    s.name AS station_name,
-    s.site_code,
-    EXTRACT(YEAR FROM tr.record_time) AS record_year,
-    COUNT(*) AS reading_count,
-    AVG(tr.tide_level) AS avg_tide_level,
-    MIN(tr.tide_level) AS min_tide_level,
-    MAX(tr.tide_level) AS max_tide_level,
-    AVG(tr.salinity) AS avg_salinity,
-    AVG(tr.dissolved_oxygen) AS avg_dissolved_oxygen
-FROM enviro.station s
-JOIN enviro.tide_reading tr ON tr.station_code = s.station_code
-GROUP BY s.station_code, s.name, s.site_code,
-         EXTRACT(YEAR FROM tr.record_time)
-WITH DATA;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tide_yearly_station_year
-    ON reporting.tide_read_yearly(station_code, record_year);
-
--- Materialized View: Daily Buoy Readings Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.buoy_read_daily AS
-SELECT
-    s.station_code,
-    s.name AS station_name,
-    s.site_code,
-    DATE_TRUNC('day', br.record_time) AS record_date,
-    COUNT(*) AS reading_count,
-    AVG(br.tide_level) AS avg_tide_level,
-    MIN(br.tide_level) AS min_tide_level,
-    MAX(br.tide_level) AS max_tide_level,
-    AVG(br.salinity) AS avg_salinity,
-    AVG(br.dissolved_oxygen) AS avg_dissolved_oxygen,
-    AVG(br.current_speed) AS avg_current_speed,
-    AVG(br.water_density) AS avg_water_density
-FROM enviro.station s
-JOIN enviro.buoy_reading br ON br.station_code = s.station_code
-GROUP BY s.station_code, s.name, s.site_code,
-         DATE_TRUNC('day', br.record_time)
-WITH DATA;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_buoy_daily_station_date
-    ON reporting.buoy_read_daily(station_code, record_date);
-
--- Materialized View: Weekly Buoy Readings Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.buoy_read_weekly AS
-SELECT
-    s.station_code,
-    s.name AS station_name,
-    s.site_code,
-    DATE_TRUNC('week', br.record_time) AS record_week,
-    COUNT(*) AS reading_count,
-    AVG(br.tide_level) AS avg_tide_level,
-    MIN(br.tide_level) AS min_tide_level,
-    MAX(br.tide_level) AS max_tide_level,
-    AVG(br.salinity) AS avg_salinity,
-    AVG(br.dissolved_oxygen) AS avg_dissolved_oxygen,
-    AVG(br.current_speed) AS avg_current_speed
-FROM enviro.station s
-JOIN enviro.buoy_reading br ON br.station_code = s.station_code
-GROUP BY s.station_code, s.name, s.site_code,
-         DATE_TRUNC('week', br.record_time)
-WITH DATA;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_buoy_weekly_station_week
-    ON reporting.buoy_read_weekly(station_code, record_week);
-
--- Materialized View: Yearly Buoy Readings Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.buoy_read_yearly AS
-SELECT
-    s.station_code,
-    s.name AS station_name,
-    s.site_code,
-    EXTRACT(YEAR FROM br.record_time) AS record_year,
-    COUNT(*) AS reading_count,
-    AVG(br.tide_level) AS avg_tide_level,
-    MIN(br.tide_level) AS min_tide_level,
-    MAX(br.tide_level) AS max_tide_level,
-    AVG(br.salinity) AS avg_salinity,
-    AVG(br.dissolved_oxygen) AS avg_dissolved_oxygen
-FROM enviro.station s
-JOIN enviro.buoy_reading br ON br.station_code = s.station_code
-GROUP BY s.station_code, s.name, s.site_code,
-         EXTRACT(YEAR FROM br.record_time)
-WITH DATA;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_buoy_yearly_station_year
-    ON reporting.buoy_read_yearly(station_code, record_year);
-
--- Materialized View: Dredging Production Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.dredging_production AS
-SELECT
-    si.si_num,
-    si.do_num,
-    p.po_num,
-    p.buyer_code,
-    b.name AS buyer_name,
-    fa.name AS fleet_name,
-    DATE_TRUNC('day', dr.record_date) AS work_date,
-    SUM(dr.dredging_volume) AS daily_volume,
-    dr.uom_code,
-    COUNT(dr.id) AS record_count
+    COALESCE(si.tenant_id, '00000000-0000-0000-0000-000000000000'::UUID),
+    si.si_num, si.do_num, p.po_num, p.buyer_code, b.name,
+    fa.fleet_code, fa.name,
+    DATE_TRUNC('day', dr.record_date),
+    SUM(dr.dredging_volume), dr.uom_code, COUNT(dr.id)::INT
 FROM operational.dredging_records dr
 JOIN operational.shipment_instruction si ON si.si_num = dr.si_num
 JOIN commercial.delivery_order d_o ON d_o.do_num = si.do_num
 JOIN commercial.purchase_order p ON p.po_num = d_o.po_num
 JOIN buyer.info b ON b.buyer_code = p.buyer_code
 JOIN fleet.info fa ON fa.fleet_code = si.fleet_main_code
-GROUP BY si.si_num, si.do_num, p.po_num, p.buyer_code, b.name,
-         fa.name, DATE_TRUNC('day', dr.record_date), dr.uom_code
+GROUP BY si.tenant_id, si.si_num, si.do_num, p.po_num, p.buyer_code, b.name,
+         fa.fleet_code, fa.name, DATE_TRUNC('day', dr.record_date), dr.uom_code
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dredging_prod_si_date
-    ON reporting.dredging_production(si_num, work_date);
-
--- Materialized View: Financial Summary by Account
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.account_balance AS
+CREATE MATERIALIZED VIEW reporting.account_balance (
+    account_code, account_name, account_type, tenant_id,
+    total_debit, total_credit, balance, currency_code
+) AS
 SELECT
-    fa.account_code,
-    fa.account_name,
-    fa.account_type,
-    fa.parent_code,
-    fa.account_level,
-    COALESCE(SUM(fjl.debit), 0) AS total_debit,
-    COALESCE(SUM(fjl.credit), 0) AS total_credit,
-    COALESCE(SUM(fjl.debit), 0) - COALESCE(SUM(fjl.credit), 0) AS balance,
+    fa.account_code, fa.account_name, fa.account_type,
+    COALESCE(fjl.tenant_id, '00000000-0000-0000-0000-000000000000'::UUID),
+    COALESCE(SUM(fjl.debit), 0), COALESCE(SUM(fjl.credit), 0),
+    COALESCE(SUM(fjl.debit), 0) - COALESCE(SUM(fjl.credit), 0),
     fjl.currency_code
 FROM financial.account fa
 LEFT JOIN financial.journal_line fjl ON fjl.account_code = fa.account_code
 LEFT JOIN financial.journal fj ON fj.journal_id = fjl.journal_id AND fj.is_posted = TRUE
-GROUP BY fa.account_code, fa.account_name, fa.account_type,
-         fa.parent_code, fa.account_level, fjl.currency_code
+GROUP BY fa.account_code, fa.account_name, fa.account_type, fjl.tenant_id, fjl.currency_code
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_account_balance_code
-    ON reporting.account_balance(account_code);
-
--- Materialized View: HSE Incident Summary
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.hse_incident_summary AS
+CREATE MATERIALIZED VIEW reporting.hse_incident_summary (
+    tenant_id, incident_type, type_name, severity, incident_month,
+    incident_count, closed_count, open_count
+) AS
 SELECT
-    hi.incident_type,
-    hit.type_name AS type_name,
-    hi.severity,
-    DATE_TRUNC('month', hi.incident_date) AS incident_month,
-    COUNT(*) AS incident_count,
-    COUNT(CASE WHEN hi.status = 'CLOSED' THEN 1 END) AS closed_count,
-    COUNT(CASE WHEN hi.status != 'CLOSED' THEN 1 END) AS open_count
+    COALESCE(hi.tenant_id, '00000000-0000-0000-0000-000000000000'::UUID),
+    hi.incident_type, hit.type_name, hi.severity,
+    DATE_TRUNC('month', hi.incident_date),
+    COUNT(*)::INT,
+    COUNT(CASE WHEN hi.status = 'CLOSED' THEN 1 END)::INT,
+    COUNT(CASE WHEN hi.status != 'CLOSED' THEN 1 END)::INT
 FROM hse.incident hi
 JOIN hse.incident_type hit ON hit.type_code = hi.incident_type
-GROUP BY hi.incident_type, hit.type_name, hi.severity,
+GROUP BY hi.tenant_id, hi.incident_type, hit.type_name, hi.severity,
          DATE_TRUNC('month', hi.incident_date)
 WITH DATA;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_hse_incident_type_severity_month
-    ON reporting.hse_incident_summary(incident_type, severity, incident_month);
-
--- Materialized View: Fleet Utilization
-CREATE MATERIALIZED VIEW IF NOT EXISTS reporting.fleet_utilization AS
-SELECT
-    fi.fleet_code,
-    fi.name AS fleet_name,
-    ft.type_name,
-    si.work_area_code,
-    owa.name AS work_area_name,
-    COUNT(DISTINCT si.si_num) AS total_shipments,
-    SUM(EXTRACT(EPOCH FROM (COALESCE(si.actual_end, si.planned_end) - COALESCE(si.actual_start, si.planned_start)))/3600) AS total_hours_worked,
-    COUNT(DISTINCT DATE_TRUNC('day', COALESCE(si.actual_start, si.planned_start))) AS working_days
-FROM fleet.info fi
-LEFT JOIN fleet.type ft ON ft.type_code = fi.type_code
-LEFT JOIN operational.shipment_instruction si ON si.fleet_main_code = fi.fleet_code
-LEFT JOIN operational.work_area owa ON owa.area_code = si.work_area_code
-GROUP BY fi.fleet_code, fi.name, ft.type_name, si.work_area_code, owa.name
-WITH DATA;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_fleet_utilization_code
-    ON reporting.fleet_utilization(fleet_code);
+-- ============================================================
+-- END OF TABLES
+-- ============================================================
 
 -- ============================================================
--- GLOBAL AUTO updated_at TRIGGER
+-- SECTION 25: FUNCTIONS
 -- ============================================================
-DO $$
+
+-- Buyer: Prevent ledger updates
+CREATE OR REPLACE FUNCTION buyer.fn_prevent_ledger_update()
+RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'Ledger entries are immutable. Create a reversal entry instead.';
+END;
+$$ LANGUAGE plpgsql;
+
+-- Buyer: Reverse ledger entry
+CREATE OR REPLACE FUNCTION buyer.fn_reverse_ledger_entry(
+    p_entry_id BIGINT,
+    p_reason TEXT
+) RETURNS BIGINT AS $$
 DECLARE
-    r RECORD;
-    trigger_exists BOOLEAN;
+    v_new_id BIGINT;
+    v_entry buyer.ledger_hist%ROWTYPE;
+BEGIN
+    SELECT * INTO v_entry FROM buyer.ledger_hist WHERE id = p_entry_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Ledger entry not found: %', p_entry_id;
+    END IF;
+    INSERT INTO buyer.ledger_hist (
+        buyer_code, transaction_date, transaction_type, amount,
+        currency_code, ref_doc, ref_type, description, reversal_of_id
+    ) VALUES (
+        v_entry.buyer_code, CURRENT_DATE,
+        CASE v_entry.transaction_type WHEN 'CREDIT' THEN 'DEBIT' ELSE 'CREDIT' END,
+        v_entry.amount, v_entry.currency_code, v_entry.ref_doc,
+        v_entry.ref_type, 'REVERSAL: ' || p_reason, p_entry_id
+    ) RETURNING id INTO v_new_id;
+    RETURN v_new_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Form: Auto-update sample count
+CREATE OR REPLACE FUNCTION form.fn_update_sample_count()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        UPDATE form.water_sampling SET total_sample = total_sample + 1 WHERE form_no = NEW.form_no;
+        RETURN NEW;
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE form.water_sampling SET total_sample = total_sample - 1 WHERE form_no = OLD.form_no;
+        RETURN OLD;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Operational: Convert volume to target UOM
+CREATE OR REPLACE FUNCTION operational.fn_convert_volume_to_target_uom(
+    p_volume NUMERIC, p_from_uom VARCHAR, p_to_uom VARCHAR
+) RETURNS NUMERIC AS $$
+DECLARE v_converted NUMERIC;
+BEGIN
+    IF p_from_uom = p_to_uom THEN RETURN p_volume; END IF;
+    SELECT conv_value * p_volume INTO v_converted
+    FROM param.unit_conversion
+    WHERE uom_from = p_from_uom AND uom_to = p_to_uom AND is_active = TRUE;
+    IF v_converted IS NULL THEN
+        SELECT (p_volume / conv_value) INTO v_converted
+        FROM param.unit_conversion
+        WHERE uom_from = p_to_uom AND uom_to = p_from_uom AND is_active = TRUE;
+    END IF;
+    RETURN COALESCE(v_converted, p_volume);
+END;
+$$ LANGUAGE plpgsql;
+
+-- Operational: Validate dredging volume
+CREATE OR REPLACE FUNCTION operational.fn_validate_dredging_volume()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_do_num VARCHAR(30); v_target NUMERIC(18,4); v_target_uom VARCHAR(20);
+    v_total NUMERIC(18,4); v_converted_vol NUMERIC(18,4);
+BEGIN
+    SELECT si.do_num, d_o.target_volume, d_o.uom_code
+    INTO v_do_num, v_target, v_target_uom
+    FROM operational.shipment_instruction si
+    JOIN commercial.delivery_order d_o ON d_o.do_num = si.do_num
+    WHERE si.si_num = NEW.si_num;
+    IF v_do_num IS NULL OR v_target IS NULL THEN RETURN NEW; END IF;
+    v_converted_vol := operational.fn_convert_volume_to_target_uom(NEW.dredging_volume, NEW.uom_code, v_target_uom);
+    SELECT COALESCE(SUM(
+        operational.fn_convert_volume_to_target_uom(dr.dredging_volume, dr.uom_code, v_target_uom)
+    ), 0) INTO v_total
+    FROM operational.dredging_records dr
+    JOIN operational.shipment_instruction si ON si.si_num = dr.si_num
+    WHERE si.do_num = v_do_num AND dr.id <> COALESCE(NEW.id, -1);
+    IF (v_total + v_converted_vol) > v_target THEN
+        RAISE EXCEPTION 'VOLUME_EXCEEDED: Total volume (%) exceeds target (%) for DO %',
+            ROUND(v_total + v_converted_vol, 4), ROUND(v_target, 4), v_do_num;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Financial: Validate journal balance
+CREATE OR REPLACE FUNCTION financial.fn_validate_journal_balance()
+RETURNS TRIGGER AS $$
+DECLARE v_total_debit NUMERIC(18,2); v_total_credit NUMERIC(18,2);
+BEGIN
+    SELECT COALESCE(SUM(debit), 0), COALESCE(SUM(credit), 0)
+    INTO v_total_debit, v_total_credit
+    FROM financial.journal_line WHERE journal_id = NEW.journal_id;
+    IF v_total_debit <> v_total_credit THEN
+        RAISE EXCEPTION 'JOURNAL_UNBALANCED: Debit: % | Credit: %', v_total_debit, v_total_credit;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Voyage: Archive to history
+CREATE OR REPLACE FUNCTION voyage.fn_archive_to_history()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO voyage.voyage_hist (fleet_code, voyage_no, lat, long, speed, heading, record_time)
+    VALUES (OLD.fleet_code, OLD.voyage_no, OLD.lat, OLD.long, OLD.speed, OLD.heading, OLD.record_time);
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Security: Get current tenant ID
+CREATE OR REPLACE FUNCTION security.fn_get_current_tenant_id()
+RETURNS UUID AS $$
+BEGIN RETURN (
+    SELECT tenant_id FROM security.user_scope
+    WHERE auth_user_id = auth.uid() AND is_active = TRUE
+    ORDER BY is_primary DESC LIMIT 1
+);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Security: Check if super admin
+CREATE OR REPLACE FUNCTION security.fn_is_super_admin()
+RETURNS BOOLEAN AS $$
+BEGIN RETURN (
+    SELECT is_super_admin FROM security.app_user WHERE auth_user_id = auth.uid()
+);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Telemetry: Update latest position
+CREATE OR REPLACE FUNCTION telemetry.fn_update_latest_position()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO telemetry.vessel_position_latest (
+        fleet_code, tenant_id, partner_code, mmsi, latitude, longitude, geom,
+        speed_over_ground, course_over_ground, heading, navigation_status,
+        destination, eta, last_update, data_quality, source_system
+    ) VALUES (
+        NEW.fleet_code, NEW.tenant_id, NEW.partner_code, NEW.mmsi,
+        NEW.latitude, NEW.longitude, NEW.geom,
+        NEW.speed_over_ground, NEW.course_over_ground, NEW.heading, NEW.navigation_status,
+        NEW.destination, NEW.eta, NEW.reported_at, NEW.data_quality, NEW.source_system
+    )
+    ON CONFLICT (fleet_code) DO UPDATE SET
+        tenant_id = EXCLUDED.tenant_id, partner_code = EXCLUDED.partner_code,
+        mmsi = EXCLUDED.mmsi, latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude,
+        geom = EXCLUDED.geom, speed_over_ground = EXCLUDED.speed_over_ground,
+        course_over_ground = EXCLUDED.course_over_ground, heading = EXCLUDED.heading,
+        navigation_status = EXCLUDED.navigation_status, destination = EXCLUDED.destination,
+        eta = EXCLUDED.eta, last_update = EXCLUDED.last_update,
+        data_quality = EXCLUDED.data_quality, source_system = EXCLUDED.source_system,
+        updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Telemetry: Check geofence
+CREATE OR REPLACE FUNCTION telemetry.fn_check_geofence()
+RETURNS TRIGGER AS $$
+DECLARE v_geofence RECORD; v_prev_pos RECORD; v_prev_in_geofence BOOLEAN; v_curr_in_geofence BOOLEAN;
+BEGIN
+    SELECT latitude, longitude, geom INTO v_prev_pos
+    FROM telemetry.vessel_position_latest WHERE fleet_code = NEW.fleet_code;
+    FOR v_geofence IN SELECT * FROM telemetry.geofence WHERE is_active = TRUE AND tenant_id = NEW.tenant_id LOOP
+        IF v_prev_pos.geom IS NOT NULL THEN
+            SELECT ST_Contains(v_geofence.geom, v_prev_pos.geom) INTO v_prev_in_geofence;
+        ELSE v_prev_in_geofence := FALSE; END IF;
+        SELECT ST_Contains(v_geofence.geom, NEW.geom) INTO v_curr_in_geofence;
+        IF NOT v_prev_in_geofence AND v_curr_in_geofence THEN
+            INSERT INTO telemetry.geofence_event (
+                tenant_id, geofence_id, fleet_code, event_type, event_time, position_at_event, distance_from_center
+            ) VALUES (NEW.tenant_id, v_geofence.geofence_id, NEW.fleet_code, 'ENTRY', NEW.reported_at, NEW.geom, ST_Distance(v_geofence.geom, NEW.geom));
+        END IF;
+        IF v_prev_in_geofence AND NOT v_curr_in_geofence THEN
+            INSERT INTO telemetry.geofence_event (
+                tenant_id, geofence_id, fleet_code, event_type, event_time, position_at_event, distance_from_center
+            ) VALUES (NEW.tenant_id, v_geofence.geofence_id, NEW.fleet_code, 'EXIT', NEW.reported_at, NEW.geom, ST_Distance(v_geofence.geom, NEW.geom));
+        END IF;
+    END LOOP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Workflow: Start instance
+CREATE OR REPLACE FUNCTION workflow.fn_start_instance(
+    p_workflow_code VARCHAR, p_document_type VARCHAR, p_document_id VARCHAR,
+    p_initiated_by VARCHAR, p_priority VARCHAR DEFAULT 'NORMAL'
+) RETURNS BIGINT AS $$
+DECLARE
+    v_workflow_id BIGINT; v_instance_id BIGINT; v_first_step_id BIGINT;
+    v_first_step_order SMALLINT; v_instance_code VARCHAR(50);
+BEGIN
+    SELECT workflow_id INTO v_workflow_id FROM workflow.definition WHERE workflow_code = p_workflow_code AND is_active = TRUE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Workflow not found: %', p_workflow_code; END IF;
+    IF EXISTS (SELECT 1 FROM workflow.instance WHERE document_type = p_document_type AND document_id = p_document_id) THEN
+        RAISE EXCEPTION 'Workflow already exists for document: % / %', p_document_type, p_document_id;
+    END IF;
+    SELECT step_id, step_order INTO v_first_step_id, v_first_step_order
+    FROM workflow.step WHERE workflow_id = v_workflow_id AND step_order = 1 AND is_active = TRUE;
+    v_instance_code := p_workflow_code || '_' || p_document_id || '_' || TO_CHAR(now(), 'YYYYMMDDHH24MISS');
+    INSERT INTO workflow.instance (instance_code, workflow_id, document_type, document_id, current_step_order, status, initiated_by, due_date, priority)
+    VALUES (v_instance_code, v_workflow_id, p_document_type, p_document_id, v_first_step_order, 'IN_PROGRESS', p_initiated_by, now() + INTERVAL '7 days', p_priority)
+    RETURNING instance_id INTO v_instance_id;
+    INSERT INTO workflow.instance_step (instance_id, step_id, step_order, status, started_at, assigned_to)
+    VALUES (v_instance_id, v_first_step_id, v_first_step_order, 'IN_PROGRESS', now(), (SELECT approver_user FROM workflow.step WHERE step_id = v_first_step_id));
+    RETURN v_instance_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Workflow: Process step
+CREATE OR REPLACE FUNCTION workflow.fn_process_step(
+    p_instance_id BIGINT, p_approver_user VARCHAR, p_decision VARCHAR, p_comments TEXT DEFAULT NULL
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_instance RECORD; v_current_step RECORD; v_current_step_def RECORD;
+    v_next_step_order SMALLINT; v_next_step_id BIGINT; v_approval_count INT; v_required_count INT; v_row_locked BIGINT;
+BEGIN
+    SELECT instance_id INTO v_row_locked FROM workflow.instance WHERE instance_id = p_instance_id AND is_locked = FALSE FOR UPDATE;
+    IF v_row_locked IS NULL THEN RAISE EXCEPTION 'Instance is locked or not found: %', p_instance_id; END IF;
+    UPDATE workflow.instance SET is_locked = TRUE WHERE instance_id = p_instance_id;
+    BEGIN
+        SELECT * INTO v_instance FROM workflow.instance WHERE instance_id = p_instance_id;
+        SELECT ws.*, wsi.instance_step_id INTO v_current_step
+        FROM workflow.instance_step wsi JOIN workflow.step ws ON ws.step_id = wsi.step_id
+        WHERE wsi.instance_id = p_instance_id AND wsi.step_order = v_instance.current_step_order;
+        SELECT COUNT(*) INTO v_approval_count FROM workflow.approval WHERE instance_step_id = v_current_step.instance_step_id AND approver_user = p_approver_user;
+        IF v_approval_count > 0 THEN RAISE EXCEPTION 'User % has already processed this step', p_approver_user; END IF;
+        SELECT required_approval_count INTO v_required_count FROM workflow.step WHERE step_id = v_current_step.step_id;
+        INSERT INTO workflow.approval (instance_step_id, approver_user, decision, comments, sequence_no)
+        VALUES (v_current_step.instance_step_id, p_approver_user, p_decision, p_comments, v_approval_count + 1);
+        IF p_decision = 'REJECTED' THEN
+            UPDATE workflow.instance_step SET status = 'REJECTED', completed_at = now() WHERE instance_step_id = v_current_step.instance_step_id;
+            UPDATE workflow.instance SET status = 'REJECTED', current_step_order = 0, completed_at = now(), is_locked = FALSE WHERE instance_id = p_instance_id;
+            INSERT INTO workflow.history (instance_id, action, from_step_order, performed_by, details)
+            VALUES (p_instance_id, 'REJECTED', v_instance.current_step_order, p_approver_user, jsonb_build_object('decision', p_decision, 'comments', p_comments));
+            RETURN TRUE;
+        END IF;
+        SELECT COUNT(*) INTO v_approval_count FROM workflow.approval WHERE instance_step_id = v_current_step.instance_step_id AND decision = 'APPROVED';
+        IF v_approval_count < v_required_count THEN UPDATE workflow.instance SET is_locked = FALSE WHERE instance_id = p_instance_id; RETURN TRUE; END IF;
+        UPDATE workflow.instance_step SET status = 'APPROVED', completed_at = now() WHERE instance_step_id = v_current_step.instance_step_id;
+        SELECT * INTO v_current_step_def FROM workflow.step WHERE step_id = v_current_step.step_id;
+        v_next_step_order := v_current_step_def.next_step_order_approve;
+        IF v_next_step_order IS NULL THEN
+            UPDATE workflow.instance SET status = 'APPROVED', completed_at = now(), is_locked = FALSE WHERE instance_id = p_instance_id;
+            INSERT INTO workflow.history (instance_id, action, from_step_order, performed_by, details)
+            VALUES (p_instance_id, 'COMPLETED', v_instance.current_step_order, p_approver_user, jsonb_build_object('decision', p_decision));
+            RETURN TRUE;
+        END IF;
+        SELECT step_id INTO v_next_step_id FROM workflow.step WHERE workflow_id = v_instance.workflow_id AND step_order = v_next_step_order;
+        UPDATE workflow.instance SET current_step_order = v_next_step_order, is_locked = FALSE WHERE instance_id = p_instance_id;
+        INSERT INTO workflow.instance_step (instance_id, step_id, step_order, status, started_at, assigned_to)
+        VALUES (p_instance_id, v_next_step_id, v_next_step_order, 'IN_PROGRESS', now(), (SELECT approver_user FROM workflow.step WHERE step_id = v_next_step_id));
+        INSERT INTO workflow.history (instance_id, action, from_step_order, to_step_order, performed_by, details)
+        VALUES (p_instance_id, 'APPROVED', v_instance.current_step_order, v_next_step_order, p_approver_user, jsonb_build_object('decision', p_decision, 'comments', p_comments));
+        RETURN TRUE;
+    EXCEPTION WHEN OTHERS THEN UPDATE workflow.instance SET is_locked = FALSE WHERE instance_id = p_instance_id; RAISE;
+    END;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Document: Upload document
+CREATE OR REPLACE FUNCTION document.fn_upload_document(
+    p_document_name VARCHAR, p_type_code VARCHAR, p_entity_type VARCHAR, p_entity_id VARCHAR,
+    p_file_name VARCHAR, p_file_path VARCHAR, p_file_size BIGINT, p_mime_type VARCHAR,
+    p_checksum VARCHAR, p_storage_bucket VARCHAR, p_uploaded_by VARCHAR,
+    p_version_notes TEXT DEFAULT NULL, p_is_update BOOLEAN DEFAULT FALSE
+) RETURNS BIGINT AS $$
+DECLARE
+    v_document_id BIGINT; v_version_no INT; v_document_code VARCHAR(50);
+BEGIN
+    IF p_is_update THEN
+        SELECT document_id, current_version + 1 INTO v_document_id, v_version_no
+        FROM document.document WHERE entity_type = p_entity_type AND entity_id = p_entity_id;
+        IF NOT FOUND THEN RAISE EXCEPTION 'Document not found for update: % / %', p_entity_type, p_entity_id; END IF;
+        UPDATE document.version SET is_current = FALSE WHERE document_id = v_document_id AND is_current = TRUE;
+        UPDATE document.document SET document_name = p_document_name, current_version = v_version_no, updated_at = now() WHERE document_id = v_document_id;
+    ELSE
+        v_document_code := p_entity_type || '_' || p_entity_id || '_' || EXTRACT(EPOCH FROM now())::TEXT;
+        v_version_no := 1;
+        INSERT INTO document.document (document_code, document_name, type_code, entity_type, entity_id, current_version, uploaded_by)
+        VALUES (v_document_code, p_document_name, p_type_code, p_entity_type, p_entity_id, v_version_no, p_uploaded_by)
+        RETURNING document_id INTO v_document_id;
+    END IF;
+    INSERT INTO document.version (document_id, version_no, file_name, file_path, file_size, mime_type, checksum, storage_bucket, is_current, version_notes, uploaded_by)
+    VALUES (v_document_id, v_version_no, p_file_name, p_file_path, p_file_size, p_mime_type, p_checksum, p_storage_bucket, TRUE, p_version_notes, p_uploaded_by);
+    INSERT INTO document.audit (document_id, action, user_code, version_no, details)
+    VALUES (v_document_id, CASE WHEN p_is_update THEN 'VERSION_UPLOADED' ELSE 'CREATED' END, p_uploaded_by, v_version_no, jsonb_build_object('file_name', p_file_name, 'checksum', p_checksum));
+    RETURN v_document_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create yearly partition
+CREATE OR REPLACE FUNCTION public.fn_create_yearly_partition(p_schema_name TEXT, p_table_name TEXT, p_year INT)
+RETURNS VOID AS $$
+DECLARE v_partition_name TEXT := p_table_name || '_' || p_year;
+    v_start_date TEXT := p_year || '-01-01'; v_end_date TEXT := (p_year + 1) || '-01-01';
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = p_schema_name AND tablename = v_partition_name) THEN
+        EXECUTE format('CREATE TABLE %I.%I PARTITION OF %I.%I FOR VALUES FROM (%L) TO (%L)', p_schema_name, v_partition_name, p_schema_name, p_table_name, v_start_date, v_end_date);
+        RAISE NOTICE 'Created partition: %.%', p_schema_name, v_partition_name;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create future partitions
+CREATE OR REPLACE FUNCTION public.fn_create_future_partitions(p_schema_name TEXT, p_table_name TEXT, p_years_ahead INT DEFAULT 5)
+RETURNS VOID AS $$
+DECLARE v_current_year INT := EXTRACT(YEAR FROM CURRENT_DATE)::INT; v_year INT;
+BEGIN
+    FOR v_year IN v_current_year..(v_current_year + p_years_ahead) LOOP PERFORM public.fn_create_yearly_partition(p_schema_name, p_table_name, v_year); END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================================
+-- SECTION 26: TRIGGERS
+-- ============================================================
+
+-- Buyer: Prevent ledger updates
+CREATE OR REPLACE TRIGGER trg_prevent_ledger_update
+BEFORE UPDATE OR DELETE ON buyer.ledger_hist
+FOR EACH ROW EXECUTE FUNCTION buyer.fn_prevent_ledger_update();
+
+-- Form: Auto-update sample count
+CREATE OR REPLACE TRIGGER trg_update_sample_count
+AFTER INSERT OR DELETE ON form.sample
+FOR EACH ROW EXECUTE FUNCTION form.fn_update_sample_count();
+
+-- Operational: Validate dredging volume
+CREATE OR REPLACE TRIGGER trg_validate_dredging_volume
+BEFORE INSERT OR UPDATE OF dredging_volume, uom_code ON operational.dredging_records
+FOR EACH ROW EXECUTE FUNCTION operational.fn_validate_dredging_volume();
+
+-- Financial: Validate journal balance
+CREATE OR REPLACE TRIGGER trg_validate_journal_balance
+AFTER INSERT OR UPDATE ON financial.journal_line
+FOR EACH ROW EXECUTE FUNCTION financial.fn_validate_journal_balance();
+
+-- Voyage: Archive to history
+CREATE OR REPLACE TRIGGER trg_archive_voyage
+BEFORE UPDATE ON voyage.voyage
+FOR EACH ROW EXECUTE FUNCTION voyage.fn_archive_to_history();
+
+-- Telemetry: Update latest position
+CREATE OR REPLACE TRIGGER trg_update_latest_position
+AFTER INSERT ON telemetry.ais_position
+FOR EACH ROW EXECUTE FUNCTION telemetry.fn_update_latest_position();
+
+-- Telemetry: Check geofence
+CREATE OR REPLACE TRIGGER trg_check_geofence
+AFTER INSERT ON telemetry.ais_position
+FOR EACH ROW EXECUTE FUNCTION telemetry.fn_check_geofence();
+
+-- ============================================================
+-- SECTION 27: GLOBAL updated_at TRIGGER
+-- ============================================================
+
+DO $$
+DECLARE r RECORD; trigger_exists BOOLEAN;
 BEGIN
     FOR r IN
-        SELECT n.nspname AS table_schema,
-               c.relname  AS table_name
+        SELECT n.nspname AS table_schema, c.relname AS table_name
         FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         JOIN pg_attribute a ON a.attrelid = c.oid
-        WHERE a.attname = 'updated_at'
-          AND a.attnum > 0
-          AND NOT a.attisdropped
-          AND c.relkind = 'r'
-          AND n.nspname NOT IN (
-              'pg_catalog', 'information_schema', 'reporting',
-              'vault', 'auth', 'storage', 'extensions',
-              'graphql', 'graphql_public', 'realtime',
-              'supabase_functions', 'supabase_migrations',
-              'net', 'cron', 'pgsodium', 'pgbouncer'
-          )
-          AND n.nspname NOT LIKE 'pg\_%'
-          AND n.nspname NOT LIKE 'supabase\_%'
+        WHERE a.attname = 'updated_at' AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind = 'r'
+          AND n.nspname NOT IN ('pg_catalog','information_schema','extensions','graphql','graphql_public','realtime','supabase_functions','supabase_migrations','net','cron','pgsodium','pgbouncer')
+          AND n.nspname NOT LIKE 'pg\_%' AND n.nspname NOT LIKE 'supabase\_%'
           AND has_table_privilege(c.oid, 'TRIGGER')
     LOOP
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.triggers
-            WHERE trigger_name = 'trg_updated_at'
-              AND event_object_schema = r.table_schema
-              AND event_object_table  = r.table_name
-        ) INTO trigger_exists;
-
+        SELECT EXISTS (SELECT 1 FROM information_schema.triggers WHERE trigger_name = 'trg_updated_at' AND event_object_schema = r.table_schema AND event_object_table = r.table_name) INTO trigger_exists;
         IF NOT trigger_exists THEN
             BEGIN
-                EXECUTE format(
-                    'CREATE TRIGGER trg_updated_at
-                     BEFORE UPDATE ON %I.%I
-                     FOR EACH ROW
-                     EXECUTE FUNCTION public.fn_set_updated_at()',
-                    r.table_schema, r.table_name
-                );
-            EXCEPTION WHEN OTHERS THEN
-                RAISE NOTICE 'SKIP: %.% -> %', r.table_schema, r.table_name, SQLERRM;
+                EXECUTE format('CREATE TRIGGER trg_updated_at BEFORE UPDATE ON %I.%I FOR EACH ROW EXECUTE FUNCTION public.fn_set_updated_at()', r.table_schema, r.table_name);
+            EXCEPTION WHEN OTHERS THEN RAISE NOTICE 'SKIP: %.% -> %', r.table_schema, r.table_name, SQLERRM;
             END;
         END IF;
     END LOOP;
@@ -2077,257 +2353,301 @@ END;
 $$;
 
 -- ============================================================
--- REFRESH COMMANDS (untuk cron / pg_cron)
--- ============================================================
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.tide_read_daily;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.tide_read_weekly;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.tide_read_yearly;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.buoy_read_daily;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.buoy_read_weekly;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.buoy_read_yearly;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.dredging_production;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.account_balance;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.hse_incident_summary;
--- REFRESH MATERIALIZED VIEW CONCURRENTLY reporting.fleet_utilization;
-
--- ============================================================
--- INDEXING
+-- SECTION 28: INDEXES
 -- ============================================================
 
--- 1. PARAM INDEXES
+-- Param indexes
 CREATE INDEX IF NOT EXISTS idx_param_country_active ON param.country(is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_currency_active  ON param.currency(is_active)  WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_uom_active       ON param.unit_of_measure(is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_uom_category     ON param.unit_of_measure(category) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_conversion_from  ON param.unit_conversion(uom_from) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_conversion_to    ON param.unit_conversion(uom_to)   WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_status_group     ON param.status(status_group)     WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_status_active    ON param.status(status_group, is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_threshold_param  ON param.threshold(parameter_name) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_threshold_uom    ON param.threshold(uom_code)       WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_param_role_active      ON param.role(is_active)          WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_param_currency_active ON param.currency(is_active) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_param_uom_category ON param.unit_of_measure(category) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_param_status_group ON param.status(status_group) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_param_threshold_param ON param.threshold(parameter_name) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_param_role_active ON param.role(is_active) WHERE is_active = TRUE;
 
--- 2. SITE INDEXES
-CREATE INDEX IF NOT EXISTS idx_site_type_active      ON site.type(type_group, is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_site_info_type         ON site.info(type_code);
-CREATE INDEX IF NOT EXISTS idx_site_info_geom         ON site.info USING GIST(geom)    WHERE geom IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_site_info_city         ON site.info(city)               WHERE city IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_site_info_country      ON site.info(country_id)         WHERE country_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_site_info_active       ON site.info(is_active)          WHERE is_active = TRUE;
+-- Site indexes
+CREATE INDEX IF NOT EXISTS idx_site_info_type ON site.info(type_code);
+CREATE INDEX IF NOT EXISTS idx_site_info_geom ON site.info USING GIST(geom) WHERE geom IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_site_info_tenant ON site.info(tenant_id) WHERE tenant_id IS NOT NULL;
 
--- 3. USER INDEXES
-CREATE INDEX IF NOT EXISTS idx_user_info_role         ON "user".info(role);
-CREATE INDEX IF NOT EXISTS idx_user_info_active       ON "user".info(is_active)        WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_user_detail_code        ON "user".detail(user_code);
-CREATE INDEX IF NOT EXISTS idx_user_detail_type        ON "user".detail(contact_type);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_user_one_primary ON "user".detail(user_code)      WHERE is_primary = TRUE AND is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_user_session_user       ON "user".session_log(user_code);
-CREATE INDEX IF NOT EXISTS idx_user_session_time       ON "user".session_log(login_time DESC);
+-- User indexes
+CREATE INDEX IF NOT EXISTS idx_user_info_role ON "user".info(role);
+CREATE INDEX IF NOT EXISTS idx_user_detail_user ON "user".detail(user_code);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_primary_contact ON "user".detail(user_code) WHERE is_primary = TRUE AND is_active = TRUE;
 
--- 4. PARTNER INDEXES
-CREATE INDEX IF NOT EXISTS idx_partner_type_active    ON partner.type(type_group, is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_partner_info_type       ON partner.info(type_code);
-CREATE INDEX IF NOT EXISTS idx_partner_info_site       ON partner.info(site_code)       WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_partner_info_country    ON partner.info(country_id)      WHERE country_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_partner_info_active     ON partner.info(is_active)       WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_partner_info_name       ON partner.info(name)            WHERE is_active = TRUE;
+-- Partner indexes
+CREATE INDEX IF NOT EXISTS idx_partner_info_type ON partner.info(type_code);
+CREATE INDEX IF NOT EXISTS idx_partner_info_tenant ON partner.info(tenant_id) WHERE tenant_id IS NOT NULL;
 
--- 5. BUYER INDEXES
-CREATE INDEX IF NOT EXISTS idx_buyer_info_site        ON buyer.info(site_code)         WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_buyer_info_active      ON buyer.info(is_active)         WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_buyer_site_code        ON buyer.site(buyer_code);
-CREATE INDEX IF NOT EXISTS idx_buyer_site_site         ON buyer.site(site_code);
-CREATE INDEX IF NOT EXISTS uq_buyer_site_primary       ON buyer.site(buyer_code)        WHERE is_primary = TRUE AND is_active = TRUE;
+-- Buyer indexes
+CREATE INDEX IF NOT EXISTS idx_buyer_info_tenant ON buyer.info(tenant_id) WHERE tenant_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_buyer_ledger_buyer_date ON buyer.ledger_hist(buyer_code, transaction_date DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_buyer_ledger_type       ON buyer.ledger_hist(transaction_type);
-CREATE INDEX IF NOT EXISTS idx_buyer_ledger_ref        ON buyer.ledger_hist(ref_doc)    WHERE ref_doc IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_buyer_ledger_reversal   ON buyer.ledger_hist(reversal_of_id) WHERE reversal_of_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_buyer_ledger_ref ON buyer.ledger_hist(ref_doc) WHERE ref_doc IS NOT NULL;
 
--- 6. FLEET INDEXES
-CREATE INDEX IF NOT EXISTS idx_fleet_type_active      ON fleet.type(type_group, is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_fleet_info_partner      ON fleet.info(partner_code);
-CREATE INDEX IF NOT EXISTS idx_fleet_info_type         ON fleet.info(type_code);
-CREATE INDEX IF NOT EXISTS idx_fleet_info_flag         ON fleet.info(flag_country_id)  WHERE flag_country_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fleet_info_active       ON fleet.info(is_active)        WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_fleet_info_name         ON fleet.info(name)             WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_fleet_assign_site       ON fleet.assignment_leg(site_code);
-CREATE INDEX IF NOT EXISTS idx_fleet_assign_active     ON fleet.assignment_leg(fleet_code, est_start_date) WHERE act_end_date IS NULL;
-CREATE INDEX IF NOT EXISTS idx_fleet_assign_all        ON fleet.assignment_leg(fleet_code, est_start_date, est_end_date);
-CREATE INDEX IF NOT EXISTS idx_fleet_mtc_fleet_date    ON fleet.maintenance(fleet_code, start_date DESC);
-CREATE INDEX IF NOT EXISTS idx_fleet_mtc_status        ON fleet.maintenance(status)    WHERE status IS NOT NULL;
+-- Fleet indexes
+CREATE INDEX IF NOT EXISTS idx_fleet_info_partner ON fleet.info(partner_code);
+CREATE INDEX IF NOT EXISTS idx_fleet_info_type ON fleet.info(type_code);
+CREATE INDEX IF NOT EXISTS idx_fleet_assign_site ON fleet.assignment_leg(site_code);
+CREATE INDEX IF NOT EXISTS idx_fleet_mtc_fleet_date ON fleet.maintenance(fleet_code, start_date DESC);
 
--- 7. FORM INDEXES
-CREATE INDEX IF NOT EXISTS idx_form_sampling_date      ON form.water_sampling(sampling_date DESC);
-CREATE INDEX IF NOT EXISTS idx_form_sampling_site      ON form.water_sampling(site_code) WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_form_sampling_status    ON form.water_sampling(status)   WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_form_sampling_recorder  ON form.water_sampling(recorder_by) WHERE recorder_by IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_form_sample_form        ON form.sample(form_no);
-CREATE INDEX IF NOT EXISTS idx_form_sample_status      ON form.sample(status)           WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_form_measurement_form   ON form.measurement(form_no);
-CREATE INDEX IF NOT EXISTS idx_form_measurement_sample  ON form.measurement(sample_id);
-CREATE INDEX IF NOT EXISTS idx_form_measurement_param  ON form.measurement(parameter_name);
-CREATE INDEX IF NOT EXISTS idx_form_measurement_exceed ON form.measurement(is_exceed)   WHERE is_exceed = TRUE;
+-- Form indexes
+CREATE INDEX IF NOT EXISTS idx_form_sampling_date ON form.water_sampling(sampling_date DESC);
+CREATE INDEX IF NOT EXISTS idx_form_sampling_site ON form.water_sampling(site_code) WHERE site_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_form_sample_form ON form.sample(form_no);
+CREATE INDEX IF NOT EXISTS idx_form_measurement_sample ON form.measurement(sample_id);
 
--- 8. LABORATORY INDEXES
-CREATE INDEX IF NOT EXISTS idx_lab_info_site           ON laboratory.info(site_code)    WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_lab_info_active         ON laboratory.info(is_active)   WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_lab_equipment_lab      ON laboratory.equipment(lab_code);
-CREATE INDEX IF NOT EXISTS idx_lab_equipment_cal      ON laboratory.equipment(next_calibration) WHERE next_calibration IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_lab_method_category    ON laboratory.method(category_code);
-CREATE INDEX IF NOT EXISTS idx_lab_result_doc          ON laboratory.result(doc_no);
-CREATE INDEX IF NOT EXISTS idx_lab_result_lab          ON laboratory.result(lab_code) WHERE lab_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_lab_result_sample       ON laboratory.result(sample_id) WHERE sample_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_lab_result_date         ON laboratory.result(result_date DESC);
-CREATE INDEX IF NOT EXISTS idx_lab_result_detail       ON laboratory.result_detail(result_id);
-CREATE INDEX IF NOT EXISTS idx_lab_result_detail_param ON laboratory.result_detail(result_id, parameter_name);
+-- Laboratory indexes
+CREATE INDEX IF NOT EXISTS idx_lab_result_doc ON laboratory.result(doc_no);
+CREATE INDEX IF NOT EXISTS idx_lab_result_sample ON laboratory.result(sample_id) WHERE sample_id IS NOT NULL;
 
--- 9. SURVEY INDEXES
-CREATE INDEX IF NOT EXISTS idx_survey_type_active      ON survey.type(is_active)        WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_survey_sampling_date    ON survey.water_sampling(sampling_date DESC);
-CREATE INDEX IF NOT EXISTS idx_survey_sampling_type    ON survey.water_sampling(type_code);
-CREATE INDEX IF NOT EXISTS idx_survey_sampling_site    ON survey.water_sampling(site_code) WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_survey_sampling_status  ON survey.water_sampling(status) WHERE status IS NOT NULL;
+-- Survey indexes
+CREATE INDEX IF NOT EXISTS idx_survey_sampling_date ON survey.water_sampling(sampling_date DESC);
 CREATE INDEX IF NOT EXISTS idx_survey_measurement_form ON survey.measurement(form_no);
-CREATE INDEX IF NOT EXISTS idx_survey_measurement_param ON survey.measurement(parameter_name);
-CREATE INDEX IF NOT EXISTS idx_survey_measurement_exceed ON survey.measurement(is_exceed) WHERE is_exceed = TRUE;
 
--- 10. ENVIRO INDEXES
-CREATE INDEX IF NOT EXISTS idx_env_station_site        ON enviro.station(site_code)    WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_env_station_type        ON enviro.station(station_type);
-CREATE INDEX IF NOT EXISTS idx_env_station_geom        ON enviro.station USING GIST(geom) WHERE geom IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_env_station_status      ON enviro.station(status)        WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_env_wq_station_time     ON enviro.water_quality(station_code, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_env_wq_param            ON enviro.water_quality(record_time, station_code) WHERE station_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_env_reading_type        ON enviro.reading_type(is_active) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_env_reading_station     ON enviro.reading(station_code, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_env_reading_type_time   ON enviro.reading(reading_type, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_env_tide_station_time   ON enviro.tide_reading(station_code, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_env_buoy_station_time   ON enviro.buoy_reading(station_code, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_env_mtc_station_date    ON enviro.maintenance(station_code, start_date DESC);
-CREATE INDEX IF NOT EXISTS idx_env_mtc_status          ON enviro.maintenance(status)   WHERE status IS NOT NULL;
+-- Enviro indexes
+CREATE INDEX IF NOT EXISTS idx_env_station_site ON enviro.station(site_code) WHERE site_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_env_station_geom ON enviro.station USING GIST(geom) WHERE geom IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_env_wq_station_time ON enviro.water_quality(station_code, record_time DESC);
+CREATE INDEX IF NOT EXISTS idx_env_tide_station_time ON enviro.tide_reading(station_code, record_time DESC);
+CREATE INDEX IF NOT EXISTS idx_env_buoy_station_time ON enviro.buoy_reading(station_code, record_time DESC);
+CREATE INDEX IF NOT EXISTS idx_env_reading_station ON enviro.reading(station_code, record_time DESC);
 
--- 11. COMMERCIAL INDEXES
-CREATE INDEX IF NOT EXISTS idx_po_buyer_date           ON commercial.purchase_order(buyer_code, po_date DESC);
-CREATE INDEX IF NOT EXISTS idx_po_status_date          ON commercial.purchase_order(status, po_date DESC) WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_po_uom                  ON commercial.purchase_order(uom_code);
-CREATE INDEX IF NOT EXISTS idx_po_currency             ON commercial.purchase_order(currency_code);
-CREATE INDEX IF NOT EXISTS idx_po_target_date          ON commercial.purchase_order(target_start_date, target_end_date);
-CREATE INDEX IF NOT EXISTS idx_po_created_by           ON commercial.purchase_order(created_by) WHERE created_by IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_do_po_num               ON commercial.delivery_order(po_num);
-CREATE INDEX IF NOT EXISTS idx_do_status_date          ON commercial.delivery_order(status, do_date DESC) WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_do_discharge_site      ON commercial.delivery_order(discharge_site) WHERE discharge_site IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_do_target_date         ON commercial.delivery_order(target_start_date, target_end_date);
+-- Commercial indexes
+CREATE INDEX IF NOT EXISTS idx_po_buyer_date ON commercial.purchase_order(buyer_code, po_date DESC);
+CREATE INDEX IF NOT EXISTS idx_po_status_date ON commercial.purchase_order(status, po_date DESC) WHERE status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_do_po_num ON commercial.delivery_order(po_num);
 
--- 12. OPERATIONAL INDEXES
-CREATE INDEX IF NOT EXISTS idx_work_area_geom          ON operational.work_area USING GIST(geom) WHERE geom IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_work_area_site          ON operational.work_area(site_code)    WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_work_area_active        ON operational.work_area(is_active)   WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_si_do                  ON operational.shipment_instruction(do_num);
-CREATE INDEX IF NOT EXISTS idx_si_fleet_main           ON operational.shipment_instruction(fleet_main_code);
-CREATE INDEX IF NOT EXISTS idx_si_fleet_assist         ON operational.shipment_instruction(fleet_assist_code) WHERE fleet_assist_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_si_working_site         ON operational.shipment_instruction(working_site) WHERE working_site IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_si_discharge_site      ON operational.shipment_instruction(discharge_site) WHERE discharge_site IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_si_work_area           ON operational.shipment_instruction(work_area_code) WHERE work_area_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_si_status              ON operational.shipment_instruction(status) WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_si_planned             ON operational.shipment_instruction(planned_start DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_si_planned     ON operational.work_activity(si_num, planned_start DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_fleet         ON operational.work_activity(fleet_code, planned_start DESC);
-CREATE INDEX IF NOT EXISTS idx_activity_area           ON operational.work_activity(area_code) WHERE area_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_activity_status        ON operational.work_activity(status) WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_activity_type          ON operational.work_activity(activity_type);
-CREATE INDEX IF NOT EXISTS idx_dredging_si_activity   ON operational.dredging_records(si_num, activity_num);
-CREATE INDEX IF NOT EXISTS idx_dredging_date          ON operational.dredging_records(record_date DESC);
-CREATE INDEX IF NOT EXISTS idx_dredging_uom           ON operational.dredging_records(uom_code);
-CREATE INDEX IF NOT EXISTS idx_dredging_created_by     ON operational.dredging_records(created_by) WHERE created_by IS NOT NULL;
+-- Operational indexes
+CREATE INDEX IF NOT EXISTS idx_work_area_geom ON operational.work_area USING GIST(geom) WHERE geom IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_si_do ON operational.shipment_instruction(do_num);
+CREATE INDEX IF NOT EXISTS idx_si_fleet_main ON operational.shipment_instruction(fleet_main_code);
+CREATE INDEX IF NOT EXISTS idx_work_activity_si ON operational.work_activity(si_num, planned_start DESC);
+CREATE INDEX IF NOT EXISTS idx_dredging_si_activity ON operational.dredging_records(si_num, activity_num);
+CREATE INDEX IF NOT EXISTS idx_dredging_date ON operational.dredging_records(record_date DESC);
 
--- 13. VOYAGE INDEXES
-CREATE INDEX IF NOT EXISTS idx_voyage_fleet_time      ON voyage.voyage(fleet_code, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_voyage_do              ON voyage.voyage(do_num)                WHERE do_num IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_voyage_status          ON voyage.voyage(status)                WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_voyage_geom             ON voyage.voyage USING GIST(geom)        WHERE geom IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_voyage_hist_fleet       ON voyage.voyage_hist(fleet_code, record_time DESC);
-CREATE INDEX IF NOT EXISTS idx_voyage_hist_geom       ON voyage.voyage_hist USING GIST(geom)  WHERE geom IS NOT NULL;
+-- Voyage indexes
+CREATE INDEX IF NOT EXISTS idx_voyage_fleet_time ON voyage.voyage(fleet_code, record_time DESC);
+CREATE INDEX IF NOT EXISTS idx_voyage_geom ON voyage.voyage USING GIST(geom) WHERE geom IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_voyage_hist_fleet ON voyage.voyage_hist(fleet_code, record_time DESC);
+CREATE INDEX IF NOT EXISTS idx_voyage_hist_geom ON voyage.voyage_hist USING GIST(geom) WHERE geom IS NOT NULL;
 
--- 14. FINANCIAL INDEXES
-CREATE INDEX IF NOT EXISTS idx_fin_account_type       ON financial.account(account_type)    WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_fin_account_parent      ON financial.account(parent_code)     WHERE parent_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fin_journal_no         ON financial.journal(journal_no);
-CREATE INDEX IF NOT EXISTS idx_fin_journal_date       ON financial.journal(journal_date DESC);
-CREATE INDEX IF NOT EXISTS idx_fin_journal_period     ON financial.journal(period_year, period_month);
-CREATE INDEX IF NOT EXISTS idx_fin_journal_posted     ON financial.journal(is_posted, journal_date) WHERE is_posted = TRUE;
-CREATE INDEX IF NOT EXISTS idx_fin_journal_source     ON financial.journal(source_module, source_id) WHERE source_module IS NOT NULL;
+-- Financial indexes
+CREATE INDEX IF NOT EXISTS idx_fin_account_type ON financial.account(account_type) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_fin_journal_no ON financial.journal(journal_no);
+CREATE INDEX IF NOT EXISTS idx_fin_journal_period ON financial.journal(period_year, period_month);
 CREATE INDEX IF NOT EXISTS idx_fin_journal_line_journal ON financial.journal_line(journal_id);
-CREATE INDEX IF NOT EXISTS idx_fin_journal_line_account ON financial.journal_line(account_code);
-CREATE INDEX IF NOT EXISTS idx_fin_journal_line_cost   ON financial.journal_line(cost_center) WHERE cost_center IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fin_journal_line_partner ON financial.journal_line(partner_code) WHERE partner_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fin_invoice_no          ON financial.invoice(invoice_no);
-CREATE INDEX IF NOT EXISTS idx_fin_invoice_partner     ON financial.invoice(partner_code, invoice_date DESC);
-CREATE INDEX IF NOT EXISTS idx_fin_invoice_status     ON financial.invoice(status)           WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fin_invoice_date       ON financial.invoice(invoice_date DESC);
-CREATE INDEX IF NOT EXISTS idx_fin_invoice_line       ON financial.invoice_line(invoice_id);
-CREATE INDEX IF NOT EXISTS idx_fin_payment_no         ON financial.payment(payment_no);
-CREATE INDEX IF NOT EXISTS idx_fin_payment_partner    ON financial.payment(partner_code, payment_date DESC);
-CREATE INDEX IF NOT EXISTS idx_fin_payment_status     ON financial.payment(status)           WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fin_payment_line       ON financial.payment_line(payment_id);
-CREATE INDEX IF NOT EXISTS idx_fin_payment_line_inv   ON financial.payment_line(invoice_id) WHERE invoice_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_fin_bank_account       ON financial.bank_account(bank_name, currency_code) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_fin_bank_trans_account ON financial.bank_transaction(account_id, trans_date DESC);
-CREATE INDEX IF NOT EXISTS idx_fin_cost_center_site   ON financial.cost_center(site_code)   WHERE site_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_fin_invoice_no ON financial.invoice(invoice_no);
+CREATE INDEX IF NOT EXISTS idx_fin_invoice_partner ON financial.invoice(partner_code, invoice_date DESC);
+CREATE INDEX IF NOT EXISTS idx_fin_payment_no ON financial.payment(payment_no);
+CREATE INDEX IF NOT EXISTS idx_fin_payment_partner ON financial.payment(partner_code, payment_date DESC);
 
--- 15. HSE INDEXES
-CREATE INDEX IF NOT EXISTS idx_hse_incident_type       ON hse.incident_type(is_active)      WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_hse_incident_no         ON hse.incident(incident_no);
-CREATE INDEX IF NOT EXISTS idx_hse_incident_date       ON hse.incident(incident_date DESC);
-CREATE INDEX IF NOT EXISTS idx_hse_incident_type_sev   ON hse.incident(incident_type, severity);
-CREATE INDEX IF NOT EXISTS idx_hse_incident_site      ON hse.incident(site_code)            WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_incident_status     ON hse.incident(status)               WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_incident_reporter   ON hse.incident(reported_by)         WHERE reported_by IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_witness_incident    ON hse.incident_witness(incident_id);
-CREATE INDEX IF NOT EXISTS idx_hse_permit_no           ON hse.permit(permit_no);
-CREATE INDEX IF NOT EXISTS idx_hse_permit_site         ON hse.permit(site_code)              WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_permit_status       ON hse.permit(status)                 WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_permit_dates        ON hse.permit(start_date, end_date);
-CREATE INDEX IF NOT EXISTS idx_hse_permit_approval     ON hse.permit_approval(permit_id);
-CREATE INDEX IF NOT EXISTS idx_hse_inspection_no       ON hse.inspection(inspection_no);
-CREATE INDEX IF NOT EXISTS idx_hse_inspection_site     ON hse.inspection(site_code)         WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_inspection_date    ON hse.inspection(inspection_date DESC);
-CREATE INDEX IF NOT EXISTS idx_hse_inspection_status  ON hse.inspection(status)             WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_finding_inspection  ON hse.inspection_finding(inspection_id);
-CREATE INDEX IF NOT EXISTS idx_hse_finding_status      ON hse.inspection_finding(status)    WHERE status IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_finding_severity   ON hse.inspection_finding(severity);
-CREATE INDEX IF NOT EXISTS idx_hse_training_active     ON hse.training(is_active)           WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_hse_emp_training_user   ON hse.employee_training(user_code);
-CREATE INDEX IF NOT EXISTS idx_hse_emp_training_date   ON hse.employee_training(training_date DESC);
-CREATE INDEX IF NOT EXISTS idx_hse_emp_training_exp   ON hse.employee_training(expiry_date) WHERE expiry_date IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_ppe_site            ON hse.ppe_inventory(site_code)       WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_ppe_category       ON hse.ppe_inventory(category);
-CREATE INDEX IF NOT EXISTS idx_hse_ppe_active         ON hse.ppe_inventory(is_active)       WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_hse_ppe_dist_user      ON hse.ppe_distribution(user_code);
-CREATE INDEX IF NOT EXISTS idx_hse_ppe_dist_date       ON hse.ppe_distribution(issue_date DESC);
-CREATE INDEX IF NOT EXISTS idx_hse_risk_no             ON hse.risk_assessment(assessment_no);
-CREATE INDEX IF NOT EXISTS idx_hse_risk_site           ON hse.risk_assessment(site_code)    WHERE site_code IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_hse_risk_level          ON hse.risk_assessment(risk_level);
-CREATE INDEX IF NOT EXISTS idx_hse_risk_status         ON hse.risk_assessment(status)       WHERE status IS NOT NULL;
+-- HSE indexes
+CREATE INDEX IF NOT EXISTS idx_hse_incident_no ON hse.incident(incident_no);
+CREATE INDEX IF NOT EXISTS idx_hse_incident_date ON hse.incident(incident_date DESC);
+CREATE INDEX IF NOT EXISTS idx_hse_incident_severity ON hse.incident(incident_type, severity);
+CREATE INDEX IF NOT EXISTS idx_hse_incident_status ON hse.incident(status) WHERE status IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_hse_inspection_no ON hse.inspection(inspection_no);
+CREATE INDEX IF NOT EXISTS idx_hse_permit_no ON hse.permit(permit_no);
+CREATE INDEX IF NOT EXISTS idx_hse_permit_dates ON hse.permit(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_hse_emp_training_user ON hse.employee_training(user_code);
+CREATE INDEX IF NOT EXISTS idx_hse_emp_training_exp ON hse.employee_training(expiry_date) WHERE expiry_date IS NOT NULL;
 
--- 16. REPORTING INDEXES (on materialized views)
-CREATE INDEX IF NOT EXISTS idx_reporting_tide_daily_date   ON reporting.tide_read_daily(record_date DESC);
-CREATE INDEX IF NOT EXISTS idx_reporting_tide_weekly_date  ON reporting.tide_read_weekly(record_week DESC);
-CREATE INDEX IF NOT EXISTS idx_reporting_buoy_daily_date   ON reporting.buoy_read_daily(record_date DESC);
-CREATE INDEX IF NOT EXISTS idx_reporting_buoy_weekly_date  ON reporting.buoy_read_weekly(record_week DESC);
-CREATE INDEX IF NOT EXISTS idx_reporting_dredging_date    ON reporting.dredging_production(work_date DESC);
-CREATE INDEX IF NOT EXISTS idx_reporting_dredging_buyer   ON reporting.dredging_production(buyer_code);
-CREATE INDEX IF NOT EXISTS idx_reporting_account_type     ON reporting.account_balance(account_type);
-CREATE INDEX IF NOT EXISTS idx_reporting_hse_month        ON reporting.hse_incident_summary(incident_month DESC);
-CREATE INDEX IF NOT EXISTS idx_reporting_fleet_active     ON reporting.fleet_utilization(fleet_code);
+-- Security indexes
+CREATE INDEX IF NOT EXISTS idx_security_user_scope_auth ON security.user_scope(auth_user_id);
+CREATE INDEX IF NOT EXISTS idx_security_user_scope_tenant ON security.user_scope(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_security_permission_module ON security.permission(module) WHERE is_active = TRUE;
 
--- BRIN Indexes for Time-Series Data
-CREATE INDEX IF NOT EXISTS brin_env_wq_time  ON enviro.water_quality USING BRIN(record_time);
+-- Audit indexes
+CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit.log(tenant_id) WHERE tenant_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit.log(auth_user_id, executed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_schema_table ON audit.log(table_schema, table_name);
+CREATE INDEX IF NOT EXISTS idx_audit_log_time ON audit.log(executed_at DESC);
+
+-- Workflow indexes
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_doc ON workflow.instance(document_type, document_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_status ON workflow.instance(status);
+CREATE INDEX IF NOT EXISTS idx_workflow_instance_step ON workflow.instance_step(instance_id, step_order);
+
+-- Document indexes
+CREATE INDEX IF NOT EXISTS idx_document_entity ON document.document(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_document_version_doc ON document.version(document_id, version_no);
+CREATE INDEX IF NOT EXISTS idx_document_version_current ON document.version(document_id) WHERE is_current = TRUE;
+
+-- Telemetry indexes
+CREATE INDEX IF NOT EXISTS idx_telemetry_raw_partner ON telemetry.raw_message(partner_code, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_ais_fleet ON telemetry.ais_position(fleet_code, reported_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_ais_mmsi ON telemetry.ais_position(mmsi, received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_ais_geom ON telemetry.ais_position USING GIST(geom);
+CREATE INDEX IF NOT EXISTS idx_telemetry_latest_partner ON telemetry.vessel_position_latest(partner_code);
+CREATE INDEX IF NOT EXISTS idx_telemetry_health_fleet ON telemetry.tracking_health(fleet_code, check_time DESC);
+CREATE INDEX IF NOT EXISTS idx_telemetry_geofence_geom ON telemetry.geofence USING GIST(geom);
+CREATE INDEX IF NOT EXISTS idx_telemetry_geofence_event ON telemetry.geofence_event(fleet_code, event_time DESC);
+
+-- BRIN indexes for time-series data
+CREATE INDEX IF NOT EXISTS brin_env_wq_time ON enviro.water_quality USING BRIN(record_time);
 CREATE INDEX IF NOT EXISTS brin_env_tide_time ON enviro.tide_reading USING BRIN(record_time);
 CREATE INDEX IF NOT EXISTS brin_env_buoy_time ON enviro.buoy_reading USING BRIN(record_time);
-CREATE INDEX IF NOT EXISTS brin_voyage_time   ON voyage.voyage USING BRIN(record_time);
+CREATE INDEX IF NOT EXISTS brin_voyage_time ON voyage.voyage USING BRIN(record_time);
 CREATE INDEX IF NOT EXISTS brin_voyage_hist_time ON voyage.voyage_hist USING BRIN(record_time);
 CREATE INDEX IF NOT EXISTS brin_form_meas_time ON form.measurement USING BRIN(created_at);
 
+-- Reporting view indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_tide_daily ON reporting.tide_read_daily(tenant_id, station_code, record_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_buoy_daily ON reporting.buoy_read_daily(tenant_id, station_code, record_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_dredging_si_date ON reporting.dredging_production(tenant_id, si_num, work_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_account_code ON reporting.account_balance(account_code);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_hse_month ON reporting.hse_incident_summary(tenant_id, incident_type, severity, incident_month);
+
 -- ============================================================
--- END OF SCHEMA
+-- SECTION 29: SEED DATA
+-- ============================================================
+
+-- Countries
+INSERT INTO param.country (iso_alpha2, iso_alpha3, iso_name, iso_numeric, name) VALUES
+('ID','IDN','Indonesia',360,'Indonesia'),('MY','MYS','Malaysia',458,'Malaysia'),
+('SG','SGP','Singapore',702,'Singapore'),('TH','THA','Thailand',764,'Thailand'),
+('PH','PHL','Philippines',608,'Philippines'),('VN','VNM','Vietnam',704,'Vietnam'),
+('CN','CHN','China',156,'China'),('JP','JPN','Japan',392,'Japan'),
+('KR','KOR','South Korea',410,'South Korea'),('AU','AUS','Australia',36,'Australia'),
+('US','USA','United States',840,'United States'),('GB','GBR','United Kingdom',826,'United Kingdom'),
+('DE','DEU','Germany',276,'Germany'),('NL','NLD','Netherlands',528,'Netherlands'),
+('PA','PAN','Panama',591,'Panama'),('LR','LBR','Liberia',430,'Liberia');
+
+-- Currencies
+INSERT INTO param.currency (currency_code, name, symbol, decimal_places) VALUES
+('IDR','Indonesian Rupiah','Rp',0),('USD','US Dollar','$',2),
+('EUR','Euro','€',2),('GBP','British Pound','£',2),('SGD','Singapore Dollar','S$',2),
+('MYR','Malaysian Ringgit','RM',2),('THB','Thai Baht','฿',2),('JPY','Japanese Yen','¥',0);
+
+-- Unit of Measures
+INSERT INTO param.unit_of_measure (uom_code, name, category, symbol) VALUES
+('M3','Cubic Meter','VOLUME','m³'),('M2','Square Meter','AREA','m²'),('M','Meter','LENGTH','m'),
+('CM','Centimeter','LENGTH','cm'),('MM','Millimeter','LENGTH','mm'),('KM','Kilometer','LENGTH','km'),
+('FT','Foot','LENGTH','ft'),('IN','Inch','LENGTH','in'),('L','Liter','VOLUME','L'),
+('ML','Milliliter','VOLUME','mL'),('GAL','Gallon','VOLUME','gal'),('BBL','Barrel','VOLUME','bbl'),
+('KG','Kilogram','MASS','kg'),('G','Gram','MASS','g'),('MG','Milligram','MASS','mg'),
+('LB','Pound','MASS','lb'),('TON','Metric Ton','MASS','t'),('MT','Metric Ton','MASS','mt'),
+('CELSIUS','Celsius','TEMPERATURE','°C'),('FAHRENHEIT','Fahrenheit','TEMPERATURE','°F'),
+('HOUR','Hour','TIME','h'),('DAY','Day','TIME','d'),('SHIFT','Shift','TIME','shift'),
+('PSI','PSI','PRESSURE','psi'),('BAR','Bar','PRESSURE','bar');
+
+-- Unit Conversions
+INSERT INTO param.unit_conversion (uom_code, uom_from, uom_to, conv_value) VALUES
+('UC001','M3','BBL',6.28981),('UC002','BBL','M3',0.158987),('UC003','M','FT',3.28084),
+('UC004','FT','M',0.3048),('UC005','KG','LB',2.20462),('UC006','LB','KG',0.453592),
+('UC007','L','GAL',0.264172),('UC008','GAL','L',3.78541),('UC009','MT','M3',1.0),
+('UC010','TON','KG',1000),('UC011','KG','TON',0.001);
+
+-- Status Groups
+INSERT INTO param.status_group (group_code, group_name) VALUES
+('FORM_STATUS','Form Status'),('PO_STATUS','Purchase Order Status'),
+('DO_STATUS','Delivery Order Status'),('SI_STATUS','Shipment Instruction Status'),
+('ACTIVITY_STATUS','Activity Status'),('INCIDENT_STATUS','Incident Status'),
+('PAYMENT_STATUS','Payment Status'),('INVOICE_STATUS','Invoice Status'),
+('PERMIT_STATUS','Permit Status'),('INSPECTION_STATUS','Inspection Status');
+
+-- Status Codes
+INSERT INTO param.status (status_code, status_group, display_name, sort_order) VALUES
+('DRAFT','FORM_STATUS','Draft',1),('SUBMITTED','FORM_STATUS','Submitted',2),
+('APPROVED','FORM_STATUS','Approved',3),('REJECTED','FORM_STATUS','Rejected',4),
+('PO_DRAFT','PO_STATUS','Draft',1),('PO_PENDING','PO_STATUS','Pending Approval',2),
+('PO_APPROVED','PO_STATUS','Approved',3),('PO_IN_PROGRESS','PO_STATUS','In Progress',4),
+('PO_COMPLETED','PO_STATUS','Completed',5),('PO_CANCELLED','PO_STATUS','Cancelled',6),
+('DO_DRAFT','DO_STATUS','Draft',1),('DO_LOADING','DO_STATUS','Loading',2),
+('DO_DEPARTED','DO_STATUS','Departed',3),('DO_ARRIVED','DO_STATUS','Arrived',4),
+('DO_COMPLETED','DO_STATUS','Completed',5),('DO_CANCELLED','DO_STATUS','Cancelled',6),
+('ACT_PLANNED','ACTIVITY_STATUS','Planned',1),('ACT_STARTED','ACTIVITY_STATUS','Started',2),
+('ACT_IN_PROGRESS','ACTIVITY_STATUS','In Progress',3),('ACT_COMPLETED','ACTIVITY_STATUS','Completed',4),
+('INC_OPEN','INCIDENT_STATUS','Open',1),('INC_INVESTIGATING','INCIDENT_STATUS','Investigating',2),
+('INC_CLOSED','INCIDENT_STATUS','Closed',3),
+('PAY_PENDING','PAYMENT_STATUS','Pending',1),('PAY_COMPLETED','PAYMENT_STATUS','Completed',2),
+('INV_DRAFT','INVOICE_STATUS','Draft',1),('INV_ISSUED','INVOICE_STATUS','Issued',2),
+('INV_PAID','INVOICE_STATUS','Paid',3),('INV_OVERDUE','INVOICE_STATUS','Overdue',4);
+
+-- Roles
+INSERT INTO param.role (role_code, role_name, description) VALUES
+('SUPER_ADMIN','Super Administrator','Full system access'),
+('ADMIN','Administrator','Full access within tenant'),
+('MANAGER','Manager','Managerial access'),
+('OPERATOR','Operator','Operational user'),
+('VIEWER','Viewer','Read-only access'),
+('SAFETY_OFFICER','Safety Officer','HSE dedicated role');
+
+-- Fleet Types
+INSERT INTO fleet.type (type_code, type_group, description) VALUES
+('TS','TUGBOAT','Tugboat'),('TB','TUGBOAT','Tug Boat'),('BG','BARGE','Barge'),
+('DP','DREDGER','Dredger Pump'),('DC','DREDGER','Dredger Cutter'),
+('HD','DREDGER','Hopper Dredger'),('SB','SURVEY','Survey Boat'),
+('CR','CARGO','Cargo Vessel'),('TK','TANKER','Tanker Vessel');
+
+-- Site Types
+INSERT INTO site.type (type_code, type_group, description) VALUES
+('PORT','PORT','Port Facility'),('TERMINAL','TERMINAL','Terminal'),
+('OFFSHORE','OFFSHORE','Offshore Location'),('DREDGE','DREDGE','Dredging Area'),
+('DISPOSAL','DISPOSAL','Disposal Site'),('OFFICE','OFFICE','Office Building'),
+('WAREHOUSE','WAREHOUSE','Warehouse');
+
+-- Partner Types
+INSERT INTO partner.type (type_code, type_group, description) VALUES
+('VENDOR','VENDOR','Material/Service Vendor'),('CONTRACTOR','CONTRACTOR','Contractor'),
+('SUPPLIER','SUPPLIER','Supplier'),('CLIENT','CLIENT','Client/Customer'),
+('CONSULTANT','CONSULTANT','Consultant'),('TRANSPORTER','TRANSPORTER','Transporter');
+
+-- Enviro Reading Types
+INSERT INTO enviro.reading_type (type_code, type_name, description) VALUES
+('TIDE','Tide Station','Tide measurement station'),('BUOY','Buoy Station','Buoy measurement station'),
+('METEO','Meteorological','Meteorological station'),('WAVE','Wave Station','Wave measurement station');
+
+-- HSE Incident Types
+INSERT INTO hse.incident_type (type_code, type_name, description) VALUES
+('NEAR_MISS','Near Miss','Near miss incident'),('INJURY','Personal Injury','Personal injury'),
+('ENVIRONMENTAL','Environmental','Environmental incident'),('PROPERTY','Property Damage','Property damage'),
+('FIRE','Fire','Fire incident'),('SPILL','Spill','Spill incident');
+
+-- Document Types
+INSERT INTO document.type (type_code, type_name, category, max_size_kb, allowed_extensions) VALUES
+('CONTRACT','Contract','LEGAL',20480,'.pdf,.doc,.docx'),('CERTIFICATE','Certificate','CERT',5120,'.pdf,.jpg,.png'),
+('REPORT','Report','REPORT',10240,'.pdf,.xlsx,.docx'),('IMAGE','Image','IMAGE',5120,'.jpg,.jpeg,.png,.gif'),
+('DRAWING','Drawing','TECHNICAL',20480,'.pdf,.dwg,.dxf'),('INVOICE_DOC','Invoice','FINANCIAL',5120,'.pdf'),
+('APPROVAL_DOC','Approval Doc','ADMIN',5120,'.pdf,.doc,.docx'),('PERMIT_DOC','Permit','HSE',10240,'.pdf');
+
+-- Survey Types
+INSERT INTO survey.type (type_code, type_name, description) VALUES
+('BATHYMETRIC','Bathymetric Survey','Bathymetric survey'),('GEOTECHNICAL','Geotechnical Survey','Geotechnical investigation'),
+('ENVIRONMENTAL','Environmental Survey','Environmental assessment'),('HYDROGRAPHIC','Hydrographic Survey','Hydrographic survey');
+
+-- Permissions
+INSERT INTO security.permission (permission_code, permission_name, module) VALUES
+('form.read','Read Forms','FORM'),('form.write','Write Forms','FORM'),
+('commercial.read','Read Commercial','COMMERCIAL'),('commercial.write','Write Commercial','COMMERCIAL'),
+('financial.read','Read Financial','FINANCIAL'),('financial.write','Write Financial','FINANCIAL'),
+('hse.read','Read HSE','HSE'),('hse.write','Write HSE','HSE'),
+('operational.read','Read Operational','OPERATIONAL'),('operational.write','Write Operational','OPERATIONAL'),
+('fleet.read','Read Fleet','FLEET'),('fleet.write','Write Fleet','FLEET'),
+('admin.users','Manage Users','ADMIN'),('admin.tenant','Manage Tenant','ADMIN');
+
+-- Workflow: PO Approval
+INSERT INTO workflow.definition (workflow_code, workflow_name, module) VALUES
+('WF_PO_APPROVAL','Purchase Order Approval','COMMERCIAL');
+WITH wf AS (SELECT workflow_id FROM workflow.definition WHERE workflow_code = 'WF_PO_APPROVAL')
+INSERT INTO workflow.step (workflow_id, step_order, step_name, step_type, approver_role, timeout_hours, next_step_order_approve)
+SELECT wf.workflow_id, 1, 'Manager Review', 'APPROVAL', 'MANAGER', 24, 2 FROM wf;
+WITH wf AS (SELECT workflow_id FROM workflow.definition WHERE workflow_code = 'WF_PO_APPROVAL')
+INSERT INTO workflow.step (workflow_id, step_order, step_name, step_type, next_step_order_approve)
+SELECT wf.workflow_id, 2, 'Finalize', 'END', NULL FROM wf;
+
+-- Workflow: HSE Incident
+INSERT INTO workflow.definition (workflow_code, workflow_name, module) VALUES
+('WF_INCIDENT','Incident Investigation','HSE');
+WITH wf AS (SELECT workflow_id FROM workflow.definition WHERE workflow_code = 'WF_INCIDENT')
+INSERT INTO workflow.step (workflow_id, step_order, step_name, step_type, next_step_order_approve)
+SELECT wf.workflow_id, 1, 'Start', 'START', 2 FROM wf;
+WITH wf AS (SELECT workflow_id FROM workflow.definition WHERE workflow_code = 'WF_INCIDENT')
+INSERT INTO workflow.step (workflow_id, step_order, step_name, step_type, approver_role, timeout_hours, next_step_order_approve)
+SELECT wf.workflow_id, 2, 'Safety Officer Review', 'APPROVAL', 'SAFETY_OFFICER', 24, 3 FROM wf;
+WITH wf AS (SELECT workflow_id FROM workflow.definition WHERE workflow_code = 'WF_INCIDENT')
+INSERT INTO workflow.step (workflow_id, step_order, step_name, step_type, next_step_order_approve)
+SELECT wf.workflow_id, 3, 'Close', 'END', NULL FROM wf;
+
+-- ============================================================
+-- END OF FILE
 -- ============================================================
