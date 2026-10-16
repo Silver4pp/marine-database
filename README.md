@@ -1,7 +1,5 @@
 # Raw SQL — database baru atau pemulihan terpisah
 
-**Disalin dari folder `serah-terima/database/` pada 16 Oktober 2026.** Salinan ini untuk rujukan/pemulihan database baru; sumber resmi tetap di folder induk.
-
 ## Pilihan yang disarankan
 
 `BARU.sql` adalah snapshot lengkap level DDL65: schema dan data demo/UAT yang sudah ada di snapshot. Jalankan **hanya** ke database baru yang kosong atau clone disposable yang memang akan dibuang, setelah DBA menyetujui ekstensi PostGIS dan hak akses: `psql -d <database_baru_kosong> -f BARU.sql`. Setelah itu aplikasi memerlukan migrasi/bootstrap Django sebagaimana runbook.
