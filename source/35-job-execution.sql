@@ -1,0 +1,16 @@
+BEGIN;
+ALTER TABLE param.job_run ADD COLUMN IF NOT EXISTS slot_at timestamptz;
+ALTER TABLE param.job_run ADD COLUMN IF NOT EXISTS trigger_kind text NOT NULL DEFAULT 'UNKNOWN';
+ALTER TABLE param.job_run ALTER COLUMN trigger_kind SET DEFAULT 'UNKNOWN';
+ALTER TABLE param.job_run DROP CONSTRAINT IF EXISTS job_run_trigger_kind_check;
+ALTER TABLE param.job_run ADD CONSTRAINT job_run_trigger_kind_check CHECK(trigger_kind IN ('UNKNOWN','MANUAL','SCHEDULED','CATCHUP'));
+ALTER TABLE param.job_run DROP CONSTRAINT IF EXISTS job_run_status_check;
+ALTER TABLE param.job_run ADD CONSTRAINT job_run_status_check CHECK(status IN ('RUNNING','OK','FAILED','ABANDONED','SKIPPED'));
+CREATE UNIQUE INDEX IF NOT EXISTS job_slot_success73_uq ON param.job_run(job_name,slot_at) WHERE status='OK' AND slot_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS job_health73_idx ON param.job_run(job_name,started_at DESC,run_id DESC) WHERE status<>'SKIPPED';
+ALTER TABLE notification.notif_outbox ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+ALTER TABLE notification.notif_outbox ADD COLUMN IF NOT EXISTS delivery_token uuid;
+ALTER TABLE notification.notif_outbox ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0;
+ALTER TABLE notification.notif_outbox DROP CONSTRAINT IF EXISTS chk_notif_outbox_status;
+ALTER TABLE notification.notif_outbox ADD CONSTRAINT chk_notif_outbox_status CHECK(status IN ('OUTBOX','SENDING','TERKIRIM','GAGAL','UNKNOWN'));
+COMMIT;
